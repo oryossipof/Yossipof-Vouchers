@@ -41,8 +41,8 @@ default Site URL (`http://localhost:3000`).
 For this to work the Supabase project must also allow that URL — in the Supabase
 dashboard under **Authentication → URL Configuration**:
 
-- **Site URL**: the production URL of the app (e.g. `https://your-site.netlify.app`)
-- **Redirect URLs**: add `https://your-site.netlify.app/auth/callback` and, for local
+- **Site URL**: the production URL of the app (e.g. `https://yossipof-vouchers.netlify.app`)
+- **Redirect URLs**: add `https://yossipof-vouchers.netlify.app/auth/callback` and, for local
   development, `http://localhost:5173/auth/callback`
 
 Optionally set `VITE_SITE_URL` to pin the origin used in the email link; when it is
