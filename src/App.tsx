@@ -5,6 +5,7 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
 import { Login } from './pages/Login'
 import { Signup } from './pages/Signup'
+import { AuthCallback } from './pages/AuthCallback'
 import { Dashboard } from './pages/Dashboard'
 import { UsedVouchers } from './pages/UsedVouchers'
 import { AddVoucher } from './pages/AddVoucher'
@@ -16,6 +17,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route
             element={
               <ProtectedRoute>

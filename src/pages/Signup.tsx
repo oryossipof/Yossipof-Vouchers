@@ -35,7 +35,7 @@ export function Signup() {
       return
     }
     setInfo('החשבון נוצר. בדקו את תיבת האימייל שלכם לאישור, ולאחר מכן התחברו.')
-    setTimeout(() => navigate('/login'), 2500)
+    setTimeout(() => navigate('/login', { state: { email } }), 2500)
   }
 
   return (

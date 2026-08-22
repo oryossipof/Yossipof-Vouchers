@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { getAuthRedirectUrl } from '../lib/siteUrl'
+import { translateAuthError } from '../lib/authErrors'
 
 interface AuthContextValue {
   session: Session | null
@@ -8,21 +10,11 @@ interface AuthContextValue {
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string) => Promise<{ error: string | null }>
+  resendConfirmation: (email: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
-
-const AUTH_ERROR_TRANSLATIONS: Record<string, string> = {
-  'Invalid login credentials': 'אימייל או סיסמה שגויים.',
-  'Email not confirmed': 'האימייל טרם אושר. בדקו את תיבת הדואר שלכם.',
-  'User already registered': 'כבר קיים חשבון עם אימייל זה.',
-  'Password should be at least 6 characters.': 'הסיסמה חייבת להכיל לפחות 6 תווים.',
-}
-
-function translateAuthError(message: string) {
-  return AUTH_ERROR_TRANSLATIONS[message] ?? message
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -47,7 +39,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signUp(email: string, password: string) {
-    const { error } = await supabase.auth.signUp({ email, password })
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: getAuthRedirectUrl() },
+    })
+    return { error: error ? translateAuthError(error.message) : null }
+  }
+
+  async function resendConfirmation(email: string) {
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: getAuthRedirectUrl() },
+    })
     return { error: error ? translateAuthError(error.message) : null }
   }
 
@@ -57,7 +62,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, user: session?.user ?? null, loading, signIn, signUp, signOut }}
+      value={{
+        session,
+        user: session?.user ?? null,
+        loading,
+        signIn,
+        signUp,
+        resendConfirmation,
+        signOut,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,23 +1,47 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
+interface LoginLocationState {
+  notice?: string
+  email?: string
+}
+
 export function Login() {
-  const { signIn } = useAuth()
+  const { signIn, resendConfirmation } = useAuth()
   const navigate = useNavigate()
-  const [email, setEmail] = useState('')
+  const location = useLocation()
+  const state = (location.state ?? null) as LoginLocationState | null
+  const [email, setEmail] = useState(state?.email ?? '')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(state?.notice ?? null)
   const [loading, setLoading] = useState(false)
+  const [resending, setResending] = useState(false)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    setNotice(null)
     const { error } = await signIn(email, password)
     setLoading(false)
     if (error) setError(error)
     else navigate('/')
+  }
+
+  async function handleResend() {
+    setError(null)
+    setNotice(null)
+    if (!email) {
+      setError('הזינו אימייל כדי לשלוח מחדש את מייל האישור.')
+      return
+    }
+    setResending(true)
+    const { error } = await resendConfirmation(email)
+    setResending(false)
+    if (error) setError(error)
+    else setNotice('מייל אישור חדש נשלח. בדקו את תיבת הדואר (וגם את תיקיית הספאם).')
   }
 
   return (
@@ -52,6 +76,7 @@ export function Login() {
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
           <button
             type="submit"
@@ -63,6 +88,18 @@ export function Login() {
         </form>
 
         <p className="mt-4 text-center text-sm text-slate-500">
+          לא קיבלתם מייל אישור?{' '}
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={resending}
+            className="font-medium text-indigo-600 disabled:opacity-50"
+          >
+            {resending ? 'שולח…' : 'שליחה מחדש'}
+          </button>
+        </p>
+
+        <p className="mt-2 text-center text-sm text-slate-500">
           אין לכם חשבון?{' '}
           <Link to="/signup" className="font-medium text-indigo-600">
             הרשמה
