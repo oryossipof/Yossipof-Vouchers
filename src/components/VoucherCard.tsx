@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import type { Voucher } from '../types'
 import { useVouchers } from '../context/VouchersContext'
 
-const currency = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' })
+const currency = new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'USD' })
+const dateFormatter = new Intl.DateTimeFormat('he-IL')
 
 export function VoucherCard({ voucher }: { voucher: Voucher }) {
   const { getPhotoUrl, markAsUsed, removeVoucher } = useVouchers()
@@ -41,15 +42,15 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       {photoUrl && (
-        <img src={photoUrl} alt={`${voucher.store_name} voucher`} className="h-36 w-full object-cover" />
+        <img src={photoUrl} alt={`שובר ${voucher.store_name}`} className="h-36 w-full object-cover" />
       )}
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold text-slate-900">{voucher.store_name}</h3>
             <p className="text-sm text-slate-500">
-              Added {new Date(voucher.created_at).toLocaleDateString()}
-              {voucher.used_at && ` · Used ${new Date(voucher.used_at).toLocaleDateString()}`}
+              נוסף בתאריך {dateFormatter.format(new Date(voucher.created_at))}
+              {voucher.used_at && ` · נוצל בתאריך ${dateFormatter.format(new Date(voucher.used_at))}`}
             </p>
           </div>
           <span className="whitespace-nowrap rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">
@@ -59,10 +60,10 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
 
         <button
           onClick={() => setRevealCode((v) => !v)}
-          className="mt-3 w-full rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-left font-mono text-sm text-slate-700"
+          className="mt-3 w-full rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-start font-mono text-sm text-slate-700"
         >
           {revealCode ? voucher.code : '•'.repeat(Math.max(voucher.code.length, 8))}
-          <span className="ml-2 text-xs text-slate-400">{revealCode ? '(tap to hide)' : '(tap to reveal)'}</span>
+          <span className="ms-2 text-xs text-slate-400">{revealCode ? '(הקישו להסתרה)' : '(הקישו לחשיפה)'}</span>
         </button>
 
         {actionError && <p className="mt-2 text-sm text-red-600">{actionError}</p>}
@@ -74,7 +75,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
               disabled={busy}
               className="flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              Mark as used
+              סימון כנוצל
             </button>
             {!confirmingDelete ? (
               <button
@@ -82,7 +83,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
                 disabled={busy}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >
-                Delete
+                מחיקה
               </button>
             ) : (
               <button
@@ -90,7 +91,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
                 disabled={busy}
                 className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
               >
-                Confirm?
+                לאשר?
               </button>
             )}
           </div>
@@ -98,14 +99,14 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
 
         {voucher.status === 'used' && (
           <div className="mt-4 flex items-center justify-between">
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">Used</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">נוצל</span>
             {!confirmingDelete ? (
               <button
                 onClick={() => setConfirmingDelete(true)}
                 disabled={busy}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >
-                Delete
+                מחיקה
               </button>
             ) : (
               <button
@@ -113,7 +114,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
                 disabled={busy}
                 className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
               >
-                Confirm?
+                לאשר?
               </button>
             )}
           </div>

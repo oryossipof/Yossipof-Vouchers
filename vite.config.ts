@@ -12,13 +12,15 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-512-maskable.png'],
       manifest: {
-        name: 'Vouchers - Gift Cards & Coupons',
-        short_name: 'Vouchers',
-        description: 'Keep track of your gift cards, coupons and vouchers in one place.',
+        name: 'שוברים - כרטיסי מתנה וקופונים',
+        short_name: 'שוברים',
+        description: 'נהלו את כרטיסי המתנה, הקופונים והשוברים שלכם במקום אחד.',
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',
         start_url: '/',
+        lang: 'he',
+        dir: 'rtl',
         icons: [
           { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },

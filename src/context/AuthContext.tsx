@@ -13,6 +13,17 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
+const AUTH_ERROR_TRANSLATIONS: Record<string, string> = {
+  'Invalid login credentials': 'אימייל או סיסמה שגויים.',
+  'Email not confirmed': 'האימייל טרם אושר. בדקו את תיבת הדואר שלכם.',
+  'User already registered': 'כבר קיים חשבון עם אימייל זה.',
+  'Password should be at least 6 characters.': 'הסיסמה חייבת להכיל לפחות 6 תווים.',
+}
+
+function translateAuthError(message: string) {
+  return AUTH_ERROR_TRANSLATIONS[message] ?? message
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
@@ -32,12 +43,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string) {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return { error: error?.message ?? null }
+    return { error: error ? translateAuthError(error.message) : null }
   }
 
   async function signUp(email: string, password: string) {
     const { error } = await supabase.auth.signUp({ email, password })
-    return { error: error?.message ?? null }
+    return { error: error ? translateAuthError(error.message) : null }
   }
 
   async function signOut() {

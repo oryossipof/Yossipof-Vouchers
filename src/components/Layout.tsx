@@ -2,9 +2,9 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const navItems = [
-  { to: '/', label: 'Active', icon: '🎟️' },
-  { to: '/used', label: 'Used', icon: '📦' },
-  { to: '/add', label: 'Add', icon: '➕' },
+  { to: '/', label: 'פעילים', icon: '🎟️' },
+  { to: '/used', label: 'נוצלו', icon: '📦' },
+  { to: '/add', label: 'הוספה', icon: '➕' },
 ]
 
 export function Layout() {
@@ -16,7 +16,7 @@ export function Layout() {
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
             <span className="text-xl">🎁</span>
-            <span className="text-lg font-semibold text-slate-900">Vouchers</span>
+            <span className="text-lg font-semibold text-slate-900">שוברים</span>
           </div>
           <div className="flex items-center gap-3">
             <span className="hidden truncate text-xs text-slate-500 sm:inline">{user?.email}</span>
@@ -24,7 +24,7 @@ export function Layout() {
               onClick={() => signOut()}
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
             >
-              Sign out
+              התנתקות
             </button>
           </div>
         </div>

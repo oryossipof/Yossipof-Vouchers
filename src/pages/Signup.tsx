@@ -18,11 +18,11 @@ export function Signup() {
     setInfo(null)
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters.')
+      setError('הסיסמה חייבת להכיל לפחות 6 תווים.')
       return
     }
     if (password !== confirmPassword) {
-      setError('Passwords do not match.')
+      setError('הסיסמאות אינן תואמות.')
       return
     }
 
@@ -34,7 +34,7 @@ export function Signup() {
       setError(error)
       return
     }
-    setInfo('Account created. Check your email to confirm, then sign in.')
+    setInfo('החשבון נוצר. בדקו את תיבת האימייל שלכם לאישור, ולאחר מכן התחברו.')
     setTimeout(() => navigate('/login'), 2500)
   }
 
@@ -43,13 +43,13 @@ export function Signup() {
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-sm">
         <div className="mb-6 text-center">
           <div className="text-3xl">🎁</div>
-          <h1 className="mt-2 text-xl font-semibold text-slate-900">Create your account</h1>
-          <p className="text-sm text-slate-500">Start tracking your gift cards & coupons</p>
+          <h1 className="mt-2 text-xl font-semibold text-slate-900">יצירת חשבון</h1>
+          <p className="text-sm text-slate-500">התחילו לעקוב אחרי כרטיסי המתנה והקופונים שלכם</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">אימייל</label>
             <input
               type="email"
               required
@@ -59,7 +59,7 @@ export function Signup() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Password</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">סיסמה</label>
             <input
               type="password"
               required
@@ -70,7 +70,7 @@ export function Signup() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Confirm password</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">אימות סיסמה</label>
             <input
               type="password"
               required
@@ -88,14 +88,14 @@ export function Signup() {
             disabled={loading}
             className="w-full rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
           >
-            {loading ? 'Creating account…' : 'Sign up'}
+            {loading ? 'יוצר חשבון…' : 'הרשמה'}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-slate-500">
-          Already have an account?{' '}
+          כבר יש לכם חשבון?{' '}
           <Link to="/login" className="font-medium text-indigo-600">
-            Sign in
+            התחברות
           </Link>
         </p>
       </div>

@@ -30,7 +30,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase
       .from('vouchers')
       .select('*')
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: true })
     if (error) setError(error.message)
     else setVouchers(data as Voucher[])
     setLoading(false)

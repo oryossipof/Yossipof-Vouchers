@@ -25,13 +25,13 @@ export function Login() {
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-sm">
         <div className="mb-6 text-center">
           <div className="text-3xl">🎁</div>
-          <h1 className="mt-2 text-xl font-semibold text-slate-900">Welcome back</h1>
-          <p className="text-sm text-slate-500">Sign in to your vouchers</p>
+          <h1 className="mt-2 text-xl font-semibold text-slate-900">ברוכים השבים</h1>
+          <p className="text-sm text-slate-500">התחברו כדי לצפות בשוברים שלכם</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">אימייל</label>
             <input
               type="email"
               required
@@ -41,7 +41,7 @@ export function Login() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Password</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">סיסמה</label>
             <input
               type="password"
               required
@@ -58,14 +58,14 @@ export function Login() {
             disabled={loading}
             className="w-full rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
           >
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? 'מתחבר…' : 'התחברות'}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-slate-500">
-          Don't have an account?{' '}
+          אין לכם חשבון?{' '}
           <Link to="/signup" className="font-medium text-indigo-600">
-            Sign up
+            הרשמה
           </Link>
         </p>
       </div>
