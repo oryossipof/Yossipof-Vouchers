@@ -11,6 +11,7 @@ interface VouchersContextValue {
   error: string | null
   addVoucher: (input: NewVoucherInput) => Promise<{ error: string | null }>
   markAsUsed: (id: string) => Promise<{ error: string | null }>
+  markAsActive: (id: string) => Promise<{ error: string | null }>
   removeVoucher: (id: string, photoPath: string | null) => Promise<{ error: string | null }>
   getPhotoUrl: (photoPath: string) => Promise<string | null>
   refresh: () => Promise<void>
@@ -86,6 +87,15 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null }
   }
 
+  async function markAsActive(id: string) {
+    const { error } = await supabase
+      .from('vouchers')
+      .update({ status: 'active', used_at: null })
+      .eq('id', id)
+    if (!error) await refresh()
+    return { error: error?.message ?? null }
+  }
+
   async function removeVoucher(id: string, photoPath: string | null) {
     if (photoPath) {
       await supabase.storage.from(VOUCHER_PHOTOS_BUCKET).remove([photoPath])
@@ -108,7 +118,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
 
   return (
     <VouchersContext.Provider
-      value={{ vouchers, active, used, loading, error, addVoucher, markAsUsed, removeVoucher, getPhotoUrl, refresh }}
+      value={{ vouchers, active, used, loading, error, addVoucher, markAsUsed, markAsActive, removeVoucher, getPhotoUrl, refresh }}
     >
       {children}
     </VouchersContext.Provider>

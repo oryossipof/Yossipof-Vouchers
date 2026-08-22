@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import type { Voucher } from '../types'
 import { useVouchers } from '../context/VouchersContext'
 
-const currency = new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'USD' })
+const currency = new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS' })
 const dateFormatter = new Intl.DateTimeFormat('he-IL')
 
 export function VoucherCard({ voucher }: { voucher: Voucher }) {
-  const { getPhotoUrl, markAsUsed, removeVoucher } = useVouchers()
+  const { getPhotoUrl, markAsUsed, markAsActive, removeVoucher } = useVouchers()
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -32,6 +32,13 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
     setBusy(false)
   }
 
+  async function handleMarkActive() {
+    setBusy(true)
+    const { error } = await markAsActive(voucher.id)
+    setActionError(error)
+    setBusy(false)
+  }
+
   async function handleDelete() {
     setBusy(true)
     const { error } = await removeVoucher(voucher.id, voucher.photo_path)
@@ -53,9 +60,11 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
               {voucher.used_at && ` · נוצל בתאריך ${dateFormatter.format(new Date(voucher.used_at))}`}
             </p>
           </div>
-          <span className="whitespace-nowrap rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">
-            {currency.format(voucher.amount)}
-          </span>
+          {voucher.amount !== null && (
+            <span className="whitespace-nowrap rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">
+              {currency.format(voucher.amount)}
+            </span>
+          )}
         </div>
 
         <button
@@ -98,8 +107,14 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
         )}
 
         {voucher.status === 'used' && (
-          <div className="mt-4 flex items-center justify-between">
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">נוצל</span>
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={handleMarkActive}
+              disabled={busy}
+              className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+            >
+              החזרה לפעילים
+            </button>
             {!confirmingDelete ? (
               <button
                 onClick={() => setConfirmingDelete(true)}

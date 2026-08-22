@@ -5,7 +5,7 @@ export interface Voucher {
   user_id: string
   store_name: string
   code: string
-  amount: number
+  amount: number | null
   photo_path: string | null
   status: VoucherStatus
   created_at: string
@@ -15,6 +15,6 @@ export interface Voucher {
 export interface NewVoucherInput {
   store_name: string
   code: string
-  amount: number
+  amount: number | null
   photoFile: File | null
 }
