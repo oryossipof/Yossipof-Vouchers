@@ -5,6 +5,9 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Supabase's redirect allow list contains http://localhost:5183/**, so the
+  // dev server has to stay on that port for password-reset links to work.
+  server: { port: 5183 },
   plugins: [
     react(),
     tailwindcss(),

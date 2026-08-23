@@ -1,10 +1,13 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export function Signup() {
-  const { signUp } = useAuth()
+  const { signUp, resendConfirmation } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [registered, setRegistered] = useState(false)
+  const [resending, setResending] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -17,8 +20,8 @@ export function Signup() {
     setError(null)
     setInfo(null)
 
-    if (password.length < 6) {
-      setError('הסיסמה חייבת להכיל לפחות 6 תווים.')
+    if (password.length < 8) {
+      setError('הסיסמה חייבת להכיל לפחות 8 תווים.')
       return
     }
     if (password !== confirmPassword) {
@@ -34,8 +37,17 @@ export function Signup() {
       setError(error)
       return
     }
+    setRegistered(true)
     setInfo('החשבון נוצר. בדקו את תיבת האימייל שלכם לאישור, ולאחר מכן התחברו.')
-    setTimeout(() => navigate('/login'), 2500)
+  }
+
+  async function handleResend() {
+    setResending(true)
+    setError(null)
+    const { error } = await resendConfirmation(email.trim())
+    setResending(false)
+    if (error) setError(error)
+    else setInfo('נשלח אימייל אישור חדש. בדקו גם בתיקיית הספאם.')
   }
 
   return (
@@ -63,7 +75,7 @@ export function Signup() {
             <input
               type="password"
               required
-              minLength={6}
+              minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -83,18 +95,38 @@ export function Signup() {
           {error && <p className="text-sm text-red-600">{error}</p>}
           {info && <p className="text-sm text-emerald-600">{info}</p>}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {loading ? 'יוצר חשבון…' : 'הרשמה'}
-          </button>
+          {registered ? (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resending}
+                className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                {resending ? 'שולח…' : 'לא קיבלתי — שליחה מחדש'}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/login', { state: location.state })}
+                className="w-full rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+              >
+                מעבר להתחברות
+              </button>
+            </div>
+          ) : (
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {loading ? 'יוצר חשבון…' : 'הרשמה'}
+            </button>
+          )}
         </form>
 
         <p className="mt-4 text-center text-sm text-slate-500">
           כבר יש לכם חשבון?{' '}
-          <Link to="/login" className="font-medium text-indigo-600">
+          <Link to="/login" state={location.state} className="font-medium text-indigo-600">
             התחברות
           </Link>
         </p>

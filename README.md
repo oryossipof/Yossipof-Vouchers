@@ -1,6 +1,6 @@
 # Vouchers
 
-A PWA for keeping track of gift cards, coupons, and other vouchers: store a code, store name, and credit amount, optionally attach a photo, and mark vouchers as used or delete them once redeemed.
+A PWA for keeping track of gift cards, coupons, and other vouchers: store a code, store name, and credit amount, optionally attach a photo and a note, share a voucher with someone else, and mark vouchers as used or delete them once redeemed.
 
 ## Stack
 
@@ -11,11 +11,43 @@ A PWA for keeping track of gift cards, coupons, and other vouchers: store a code
 
 ## Features
 
-- Email/password sign up and login (Supabase Auth)
-- Add a voucher with store name, code, amount, and an optional photo
+- Email/password sign up and login (Supabase Auth), with resend-confirmation and password reset
+- Add a voucher with store name, code, amount, an optional note, and an optional photo
+- Duplicate-code check: entering a code you already hold shows which voucher it belongs to and blocks the save
+- Edit any voucher (pencil icon on the card), including replacing or removing its photo
 - View active vouchers, reveal/hide the code, mark as used, or delete
+- Confirmation dialog before marking a voucher as used, restoring it, or deleting it
+- Share a voucher via WhatsApp: the recipient opens the link and the voucher is added to their account
+- Shared vouchers stay in sync — marking one as used (or restoring it) applies to every account holding it
 - View used (redeemed) vouchers separately
 - Installable as a PWA with offline caching of the app shell
+
+## How sharing works
+
+Sharing a voucher calls `create_voucher_share`, which stamps the voucher with a `share_group_id` and returns a one-off token. The share link (`/claim/:token`) is sent through WhatsApp; when the recipient opens it while signed in, `claim_voucher_share` copies the voucher into their account with the same `share_group_id`. If they already hold a voucher with the same code, that existing voucher is joined to the share group instead of being duplicated.
+
+From then on, status changes go through `set_voucher_status`, which updates every voucher in the share group — so "used" in one account means "used" in all of them. Each account still keeps its own photo, note edits, and its own delete: deleting your copy does not remove anyone else's.
+
+The three functions are `security definer` and check `auth.uid()` themselves, which is what lets a status change reach rows that row-level security would otherwise hide. The `voucher_shares` table has RLS enabled with no policies, so tokens are reachable only through those functions and cannot be enumerated.
+
+Note: photos are stored per user in a private bucket, so a shared voucher arrives without the original photo. The recipient can attach their own.
+
+### Security model
+
+`0004_harden_sharing.sql` establishes the rules that make sharing safe:
+
+- **Clients cannot write `status`, `used_at`, `share_group_id`, or `share_origin`.** The `authenticated` role holds column-level INSERT/UPDATE on the editable fields only; those four move exclusively through the security definer functions. Without this a share group id would be a permanent bearer credential — anyone who ever learned one could re-join the group and flip other people's vouchers, bypassing `set_voucher_status` and surviving any attempt to unshare.
+- **Only the originator may hand out share links.** `share_origin` records who started a group; `create_voucher_share` refuses if the caller is not that person. Holding a copy is not the right to widen access to it.
+- **Claiming never silently absorbs an existing voucher.** If the claimer already has a voucher with the same code, `claim_voucher_share` returns `code_conflict` and changes nothing. Linking the two is a separate, explicitly confirmed call to `link_voucher_to_share`. Otherwise, sending someone a link for a guessed code would let you seize control of an unrelated voucher in their account.
+- **Share links expire after 30 days**, and `voucher_shares` has RLS enabled with no policies, so tokens are reachable only through the functions and cannot be enumerated.
+
+`0005_storage_hardening.sql` covers uploads: the `voucher-photos` bucket enforces a 5 MB limit and an image-only MIME allowlist server-side (the form's `accept="image/*"` is only a hint and is bypassable). `image/svg+xml` is deliberately excluded, since SVG can carry executable script that would run when the file is opened through a signed URL. The object policies are scoped to the `authenticated` role, and the upload path sanitises the file extension so a crafted filename cannot steer the storage key.
+
+Auth is configured with a minimum password length of 8 (matched by the signup form's own validation) and email confirmation required.
+
+**Known gap:** leaked-password protection (HaveIBeenPwned checks on new passwords) is **not enabled**, because Supabase gates it behind a Pro plan and this project is on Free. The security advisor will keep reporting `auth_leaked_password_protection` as a WARN until the project is upgraded, at which point it can be turned on in Authentication → Policies with no code change. Enabling CAPTCHA on auth endpoints is also still open; it needs an hCaptcha or Turnstile secret.
+
+Supabase's security advisor reports four `SECURITY DEFINER` functions callable by `authenticated`. That is intended: controlled privilege elevation is what makes cross-account sync possible, each function verifies `auth.uid()` ownership before doing anything, and all of them pin `search_path`. The `rls_enabled_no_policy` notice on `voucher_shares` is likewise deliberate deny-all.
 
 ## Local development
 
@@ -29,8 +61,55 @@ A PWA for keeping track of gift cards, coupons, and other vouchers: store a code
 
 ## Database setup
 
-The SQL in `supabase/migrations/0001_vouchers.sql` creates the `vouchers` table, its row-level security policies, and the private `voucher-photos` storage bucket (with per-user access policies). Run it against your Supabase project via the SQL editor or the Supabase CLI.
+Run the SQL in `supabase/migrations/` against your Supabase project, in order, via the SQL editor or the Supabase CLI:
+
+- `0001_vouchers.sql` — the `vouchers` table, its row-level security policies, and the private `voucher-photos` storage bucket (with per-user access policies)
+- `0002_optional_amount.sql` — makes `amount` nullable
+- `0003_notes_sharing_status_sync.sql` — adds the `note` column, the `share_group_id` column, the `voucher_shares` table, and the `create_voucher_share` / `claim_voucher_share` / `set_voucher_status` functions
+
+## Account recovery
+
+Two flows sit outside the protected routes:
+
+- **Resend confirmation** — a standalone `/resend-confirmation` page needing only an email address, linked from both login and forgot-password. It is also offered contextually: on the signup screen right after registering, and on the login screen when sign-in fails specifically because the address was never verified. All three call `supabase.auth.resend({ type: 'signup' })`.
+
+  The standalone page matters because the contextual one on login is unreachable for some users: Supabase only returns "Email not confirmed" when the password is correct, so an unverified user who also mistypes their password sees "Invalid login credentials" and never sees the resend button.
+
+  It reports the same neutral message whether or not the address is registered or already confirmed, so it cannot be used to probe account state — but rate-limit errors are shown verbatim, since the user needs to know to wait. A 60-second client-side cooldown discourages burning the project's small email quota.
+- **Password reset** — `/forgot-password` sends a link via `resetPasswordForEmail`, and `/reset-password` consumes it. The confirmation page reports the same neutral message whether or not an account exists, so it cannot be used to enumerate registered addresses.
+
+`verifyRecoveryLink` in `AuthContext` handles both link shapes Supabase can produce: a `token_hash` in the query string (PKCE), which it exchanges with `verifyOtp`, and tokens in the URL fragment (implicit), which the client exchanges on its own. Reset links are valid for one hour (`mailer_otp_exp`).
+
+Redirect targets must appear in the project's allowed redirect URLs. The list currently holds `https://yossipof-vouchers.netlify.app/**` and `http://localhost:5183/**` — which is why `vite.config.ts` pins the dev server to port 5183. On a different port, reset links will be rejected.
+
+> **Before real users rely on this:** the project uses Supabase's built-in email service, which is rate limited to **2 emails per hour** for the whole project and is documented as being for testing only. Resend and password reset will hit that ceiling almost immediately. Configure custom SMTP under Authentication → Emails before depending on either flow.
+
+## Tests
+
+Unit tests cover the duplicate-code rules in `src/lib/vouchers.ts` (case- and
+whitespace-insensitive matching, excluding the voucher being edited, matching
+used vouchers as well as active ones):
+
+```
+npm test
+```
+
+`supabase/tests/sharing_test.sql` is an integration test for the sharing model.
+It creates three throwaway auth users, then asserts that a share can be created
+and claimed, that claiming twice does not duplicate, that a voucher already held
+under the same code is merged into the share group rather than copied, that
+marking used propagates in both directions, that a stranger cannot change a
+voucher's status, that an invalid token is rejected, and that deleting your copy
+leaves the other accounts intact. It deletes its own users at the end (cascading
+to their vouchers and shares), including if an assertion fails, and asserts that
+the pre-existing voucher count is unchanged.
+
+Run it from the Supabase SQL editor and read the PASS/FAIL table it returns.
+It writes to `auth.users`, so run it against a branch or a staging project if
+you would rather not touch production auth at all.
 
 ## Deployment
 
 The app builds as a static site (`npm run build` → `dist/`) and is configured for Netlify via `netlify.toml` (SPA redirect included). Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as environment variables on the Netlify site.
+
+Share links use `window.location.origin`, so they point at whatever host the app is served from.

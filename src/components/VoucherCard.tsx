@@ -1,17 +1,62 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Voucher } from '../types'
 import { useVouchers } from '../context/VouchersContext'
+import { useAuth } from '../context/AuthContext'
+import { ConfirmDialog } from './ConfirmDialog'
+import { ShareDialog } from './ShareDialog'
 
 const currency = new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS' })
 const dateFormatter = new Intl.DateTimeFormat('he-IL')
 
+type PendingAction = 'used' | 'active' | 'delete' | null
+
+const iconButtonClass =
+  'rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50'
+
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+      <path d="M4 20h4l10-10-4-4L4 16v4z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13.5 6.5l4 4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+      <circle cx="18" cy="5" r="2.5" />
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="19" r="2.5" />
+      <path d="M8.3 10.8l7.4-4.3M8.3 13.2l7.4 4.3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+      <path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export function VoucherCard({ voucher }: { voucher: Voucher }) {
   const { getPhotoUrl, markAsUsed, markAsActive, removeVoucher } = useVouchers()
+  const navigate = useNavigate()
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [pending, setPending] = useState<PendingAction>(null)
+  const [sharing, setSharing] = useState(false)
   const [revealCode, setRevealCode] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+
+  const { user } = useAuth()
+  const isShared = Boolean(voucher.share_group_id)
+  // Only whoever started the share may hand out further links; holding a copy
+  // is not the right to widen access to it.
+  const canShare = !isShared || voucher.share_origin === user?.id
 
   useEffect(() => {
     let cancelled = false
@@ -19,32 +64,54 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
       getPhotoUrl(voucher.photo_path).then((url) => {
         if (!cancelled) setPhotoUrl(url)
       })
+    } else {
+      setPhotoUrl(null)
     }
     return () => {
       cancelled = true
     }
   }, [voucher.photo_path, getPhotoUrl])
 
-  async function handleMarkUsed() {
+  async function runPendingAction() {
+    if (!pending) return
     setBusy(true)
-    const { error } = await markAsUsed(voucher.id)
-    setActionError(error)
+    const { error } =
+      pending === 'used'
+        ? await markAsUsed(voucher.id)
+        : pending === 'active'
+          ? await markAsActive(voucher.id)
+          : await removeVoucher(voucher.id, voucher.photo_path)
     setBusy(false)
+    setPending(null)
+    setActionError(error)
   }
 
-  async function handleMarkActive() {
-    setBusy(true)
-    const { error } = await markAsActive(voucher.id)
-    setActionError(error)
-    setBusy(false)
+  const confirmCopy = {
+    used: {
+      title: 'לסמן את השובר כנוצל?',
+      message: isShared
+        ? `השובר של ${voucher.store_name} יעבור לרשימת השוברים שנוצלו, גם אצל מי שהשובר משותף איתו.`
+        : `השובר של ${voucher.store_name} יעבור לרשימת השוברים שנוצלו. תמיד אפשר להחזיר אותו לפעילים.`,
+      confirmLabel: 'כן, נוצל',
+      tone: 'primary' as const,
+    },
+    active: {
+      title: 'להחזיר את השובר לפעילים?',
+      message: isShared
+        ? `השובר של ${voucher.store_name} יחזור לרשימת השוברים הפעילים, גם אצל מי שהשובר משותף איתו.`
+        : `השובר של ${voucher.store_name} יחזור לרשימת השוברים הפעילים.`,
+      confirmLabel: 'כן, להחזיר',
+      tone: 'primary' as const,
+    },
+    delete: {
+      title: 'למחוק את השובר?',
+      message: `השובר של ${voucher.store_name} יימחק מהחשבון שלכם לצמיתות. לא ניתן לשחזר פעולה זו.`,
+      confirmLabel: 'כן, למחוק',
+      tone: 'danger' as const,
+    },
   }
 
-  async function handleDelete() {
-    setBusy(true)
-    const { error } = await removeVoucher(voucher.id, voucher.photo_path)
-    setActionError(error)
-    setBusy(false)
-  }
+  const dialog = pending ? confirmCopy[pending] : null
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -54,7 +121,14 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="font-semibold text-slate-900">{voucher.store_name}</h3>
+            <h3 className="font-semibold text-slate-900">
+              {voucher.store_name}
+              {isShared && (
+                <span className="ms-2 rounded-full bg-emerald-50 px-2 py-0.5 align-middle text-xs font-medium text-emerald-700">
+                  משותף
+                </span>
+              )}
+            </h3>
             <p className="text-sm text-slate-500">
               נוסף בתאריך {dateFormatter.format(new Date(voucher.created_at))}
               {voucher.used_at && ` · נוצל בתאריך ${dateFormatter.format(new Date(voucher.used_at))}`}
@@ -75,66 +149,81 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
           <span className="ms-2 text-xs text-slate-400">{revealCode ? '(הקישו להסתרה)' : '(הקישו לחשיפה)'}</span>
         </button>
 
+        {voucher.note && (
+          <p className="mt-3 whitespace-pre-wrap rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {voucher.note}
+          </p>
+        )}
+
         {actionError && <p className="mt-2 text-sm text-red-600">{actionError}</p>}
 
-        {voucher.status === 'active' && (
-          <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex items-center gap-2">
+          {voucher.status === 'active' ? (
             <button
-              onClick={handleMarkUsed}
+              onClick={() => setPending('used')}
               disabled={busy}
               className="flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               סימון כנוצל
             </button>
-            {!confirmingDelete ? (
-              <button
-                onClick={() => setConfirmingDelete(true)}
-                disabled={busy}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-              >
-                מחיקה
-              </button>
-            ) : (
-              <button
-                onClick={handleDelete}
-                disabled={busy}
-                className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
-              >
-                לאשר?
-              </button>
-            )}
-          </div>
-        )}
-
-        {voucher.status === 'used' && (
-          <div className="mt-4 flex gap-2">
+          ) : (
             <button
-              onClick={handleMarkActive}
+              onClick={() => setPending('active')}
               disabled={busy}
               className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
             >
               החזרה לפעילים
             </button>
-            {!confirmingDelete ? (
-              <button
-                onClick={() => setConfirmingDelete(true)}
-                disabled={busy}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-              >
-                מחיקה
-              </button>
-            ) : (
-              <button
-                onClick={handleDelete}
-                disabled={busy}
-                className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
-              >
-                לאשר?
-              </button>
-            )}
-          </div>
-        )}
+          )}
+
+          <button
+            onClick={() => navigate(`/edit/${voucher.id}`)}
+            disabled={busy}
+            aria-label="עריכת השובר"
+            title="עריכה"
+            className={iconButtonClass}
+          >
+            <EditIcon />
+          </button>
+
+          {canShare && (
+            <button
+              onClick={() => setSharing(true)}
+              disabled={busy}
+              aria-label="שיתוף השובר"
+              title="שיתוף"
+              className={iconButtonClass}
+            >
+              <ShareIcon />
+            </button>
+          )}
+
+          <button
+            onClick={() => setPending('delete')}
+            disabled={busy}
+            aria-label="מחיקת השובר"
+            title="מחיקה"
+            className={`${iconButtonClass} hover:border-red-200 hover:bg-red-50 hover:text-red-600`}
+          >
+            <TrashIcon />
+          </button>
+        </div>
       </div>
+
+      {dialog && (
+        <ConfirmDialog
+          open
+          title={dialog.title}
+          message={dialog.message}
+          confirmLabel={dialog.confirmLabel}
+          tone={dialog.tone}
+          busy={busy}
+          onConfirm={runPendingAction}
+          onCancel={() => setPending(null)}
+        />
+      )}
+
+      {sharing && <ShareDialog voucher={voucher} onClose={() => setSharing(false)} />}
     </div>
   )
 }

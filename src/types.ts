@@ -6,15 +6,22 @@ export interface Voucher {
   store_name: string
   code: string
   amount: number | null
+  note: string | null
   photo_path: string | null
   status: VoucherStatus
+  share_group_id: string | null
+  share_origin: string | null
   created_at: string
   used_at: string | null
 }
 
-export interface NewVoucherInput {
+export interface VoucherFormInput {
   store_name: string
   code: string
   amount: number | null
+  note: string | null
   photoFile: File | null
+  removePhoto: boolean
 }
+
+export type NewVoucherInput = VoucherFormInput
