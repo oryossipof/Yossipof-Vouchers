@@ -19,6 +19,17 @@ export interface ClaimResult {
   voucher: Voucher | null
 }
 
+/** One voucher's result inside a bundle ("share all") claim. */
+export interface BundleClaimItem {
+  outcome: ClaimOutcome
+  voucher: Voucher | null
+}
+
+export interface BundleClaimResult {
+  error: string | null
+  items: BundleClaimItem[]
+}
+
 interface VouchersContextValue {
   vouchers: Voucher[]
   active: Voucher[]
@@ -33,7 +44,9 @@ interface VouchersContextValue {
   findVoucherByCode: (code: string, excludeId?: string) => Voucher | null
   getVoucher: (id: string) => Voucher | null
   createShareLink: (id: string) => Promise<{ url: string | null; error: string | null }>
+  createShareAllLink: (ids: string[]) => Promise<{ url: string | null; error: string | null }>
   claimShare: (token: string) => Promise<ClaimResult>
+  claimShareBundle: (token: string) => Promise<BundleClaimResult>
   leaveShare: (id: string) => Promise<{ error: string | null }>
   removeMember: (voucherId: string, userId: string) => Promise<{ error: string | null }>
   isOwner: (voucher: Voucher) => boolean
@@ -253,6 +266,19 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     return { url: `${window.location.origin}/claim/${data as string}`, error: null }
   }
 
+  /**
+   * One link covering several vouchers, so a whole collection can go out in a
+   * single WhatsApp message. Owner-only, like the single-voucher link.
+   */
+  async function createShareAllLink(ids: string[]) {
+    const { data, error } = await supabase.rpc('create_voucher_share_bundle', {
+      p_voucher_ids: ids,
+    })
+    if (error || !data) return { url: null, error: error?.message ?? 'יצירת קישור השיתוף נכשלה' }
+    await refresh()
+    return { url: `${window.location.origin}/claim-all/${data as string}`, error: null }
+  }
+
   async function claimShare(token: string): Promise<ClaimResult> {
     const { data, error } = await supabase.rpc('claim_voucher_share', { p_token: token })
     if (error) return { error: error.message, outcome: null, voucher: null }
@@ -272,6 +298,33 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
       error: null,
       outcome: row.outcome as ClaimOutcome,
       voucher: (claimed as Voucher) ?? null,
+    }
+  }
+
+  async function claimShareBundle(token: string): Promise<BundleClaimResult> {
+    const { data, error } = await supabase.rpc('claim_voucher_share_bundle', { p_token: token })
+    if (error) return { error: error.message, items: [] }
+
+    const rows = (Array.isArray(data) ? data : []) as { voucher_id: string; outcome: string }[]
+    if (rows.length === 0) return { error: 'קישור השיתוף אינו תקין.', items: [] }
+
+    await refresh()
+
+    // Read the vouchers back rather than reaching into state: `refresh` has
+    // only just been awaited, so the state in this closure is still the old one.
+    const { data: claimed } = await supabase
+      .from('vouchers')
+      .select('*')
+      .in('id', rows.map((r) => r.voucher_id))
+
+    const byId = new Map((claimed as Voucher[] | null)?.map((v) => [v.id, v]) ?? [])
+
+    return {
+      error: null,
+      items: rows.map((r) => ({
+        outcome: r.outcome as ClaimOutcome,
+        voucher: byId.get(r.voucher_id) ?? null,
+      })),
     }
   }
 
@@ -335,7 +388,9 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         findVoucherByCode,
         getVoucher,
         createShareLink,
+        createShareAllLink,
         claimShare,
+        claimShareBundle,
         leaveShare,
         removeMember,
         isOwner,

@@ -1,26 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Voucher } from '../types'
 import { useVouchers } from '../context/VouchersContext'
-
-const ERROR_TRANSLATIONS: Record<string, string> = {
-  'Only the person who shared this voucher can share it further':
-    'רק מי ששיתף את השובר במקור יכול לשתף אותו הלאה.',
-  'Voucher not found': 'השובר לא נמצא.',
-}
-
-function translate(message: string) {
-  const key = Object.keys(ERROR_TRANSLATIONS).find((k) => message.includes(k))
-  return key ? ERROR_TRANSLATIONS[key] : message
-}
-
-function whatsappUrl(voucher: Voucher, link: string) {
-  const lines = [
-    `שיתפתי איתך שובר של ${voucher.store_name}.`,
-    'לחיצה על הקישור תוסיף אותו לחשבון שלך, ומרגע זה סימון "נוצל" יחול על שני החשבונות:',
-    link,
-  ]
-  return `https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`
-}
+import { shareOneMessage, translateShareError, whatsappUrl } from '../lib/share'
 
 export function ShareDialog({ voucher, onClose }: { voucher: Voucher; onClose: () => void }) {
   const { createShareLink } = useVouchers()
@@ -32,7 +13,7 @@ export function ShareDialog({ voucher, onClose }: { voucher: Voucher; onClose: (
     let cancelled = false
     createShareLink(voucher.id).then(({ url, error }) => {
       if (cancelled) return
-      if (error) setError(translate(error))
+      if (error) setError(translateShareError(error))
       else setLink(url)
     })
     return () => {
@@ -88,7 +69,7 @@ export function ShareDialog({ voucher, onClose }: { voucher: Voucher; onClose: (
             </p>
 
             <a
-              href={whatsappUrl(voucher, link)}
+              href={whatsappUrl(shareOneMessage(voucher, link))}
               target="_blank"
               rel="noreferrer"
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"

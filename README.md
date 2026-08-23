@@ -18,6 +18,7 @@ A PWA for keeping track of gift cards, coupons, and other vouchers: store a code
 - View active vouchers, reveal/hide the code, mark as used, or delete
 - Confirmation dialog before marking a voucher as used, restoring it, or deleting it
 - Share a voucher via WhatsApp: the recipient opens the link and the voucher is added to their account
+- Share all of them at once: one link covering every active voucher you own, sent in a single WhatsApp message
 - Shared vouchers stay in sync — marking one as used (or restoring it) applies to every account holding it
 - View used (redeemed) vouchers separately
 - Installable as a PWA with offline caching of the app shell
@@ -37,6 +38,14 @@ Photos live under the uploader's own folder in the private bucket, so uploading 
 ### The flow
 
 `create_voucher_share` returns a one-off token, which the owner sends through WhatsApp as `/claim/:token`. When the recipient opens it while signed in, `claim_voucher_share` adds them to `voucher_members` — it does not copy anything. Status changes go through `set_voucher_status` because `status` is not client-writable, and the functions are `security definer` so they can act on the single shared row.
+
+### Sharing everything at once
+
+`create_voucher_share_bundle` takes a set of voucher ids and returns one token covering all of them, sent as `/claim-all/:token`; `claim_voucher_share_bundle` joins the recipient to every voucher in it and reports each one as joined, already held, or their own, so a partly overlapping bundle still explains itself.
+
+A bundle is not a second kind of share: it is still one `voucher_shares` row per voucher, all stamped with the same `bundle_token`. Every existing rule therefore continues to apply unchanged — the 30-day expiry, and the revocation in `remove_voucher_member`, which deletes that voucher's share rows and so also strips that voucher out of any bundle link it appeared in. A deleted voucher likewise drops out, because `voucher_shares` cascades from `vouchers`. Minting is owner-only and all-or-nothing: if the caller does not own every voucher in the set, nothing is created, so a voucher shared *with* you cannot be re-shared in bulk either.
+
+On the dashboard the button shares whatever the list is currently showing, so the store-name search doubles as a way to send just part of the collection.
 
 Migrations `0003`–`0005` built an earlier model in which a share produced one copy per account and only status propagated; `0006` replaced it, folding existing copies into the shared row and preserving any field the originator had left empty. Rows removed by that merge are kept in `public.vouchers_pre_0006_backup`, which can be dropped once the new model has been exercised.
 
@@ -74,6 +83,8 @@ Run the SQL in `supabase/migrations/` against your Supabase project, in order, v
 - `0001_vouchers.sql` — the `vouchers` table, its row-level security policies, and the private `voucher-photos` storage bucket (with per-user access policies)
 - `0002_optional_amount.sql` — makes `amount` nullable
 - `0003_notes_sharing_status_sync.sql` — adds the `note` column, the `share_group_id` column, the `voucher_shares` table, and the `create_voucher_share` / `claim_voucher_share` / `set_voucher_status` functions
+- `0004`–`0009` — sharing hardening, storage hardening, the shared-row model, Realtime, the participant list, and member removal
+- `0010_share_all_vouchers.sql` — adds `voucher_shares.bundle_token` and the `create_voucher_share_bundle` / `claim_voucher_share_bundle` functions behind "share all"
 
 ## Live updates
 

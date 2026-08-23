@@ -2,13 +2,22 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useVouchers } from '../context/VouchersContext'
 import { VoucherCard } from '../components/VoucherCard'
+import { ShareAllDialog } from '../components/ShareAllDialog'
 import { StoreSearchInput } from '../components/StoreSearchInput'
 
 export function Dashboard() {
-  const { active, loading, error } = useVouchers()
+  const { active, loading, error, isOwner } = useVouchers()
   const [query, setQuery] = useState('')
+  const [sharingAll, setSharingAll] = useState(false)
 
+  const searching = query.trim().length > 0
   const filtered = active.filter((v) => v.store_name.toLowerCase().includes(query.trim().toLowerCase()))
+
+  // "Share all" follows whatever the list is currently showing, so a search
+  // doubles as a way to share just part of the collection. Only vouchers you
+  // own can go out: a voucher shared *with* you stays with its owner to pass on.
+  const shareable = filtered.filter(isOwner)
+  const excludedCount = filtered.length - shareable.length
 
   return (
     <div>
@@ -23,6 +32,21 @@ export function Dashboard() {
       </div>
 
       {active.length > 0 && <StoreSearchInput value={query} onChange={setQuery} />}
+
+      {/* One voucher already has a share button on its own card; this is for
+          sending the whole list in a single message. */}
+      {shareable.length > 1 && (
+        <button
+          type="button"
+          onClick={() => setSharingAll(true)}
+          className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+        >
+          <span aria-hidden="true">💬</span>
+          {searching
+            ? `שיתוף ${shareable.length} השוברים שמופיעים כאן`
+            : `שיתוף כל ${shareable.length} השוברים בוואטסאפ`}
+        </button>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {loading && <p className="text-sm text-slate-500">טוען…</p>}
@@ -46,6 +70,14 @@ export function Dashboard() {
           <VoucherCard key={v.id} voucher={v} />
         ))}
       </div>
+
+      {sharingAll && (
+        <ShareAllDialog
+          vouchers={shareable}
+          excludedCount={excludedCount}
+          onClose={() => setSharingAll(false)}
+        />
+      )}
     </div>
   )
 }

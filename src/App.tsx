@@ -13,6 +13,7 @@ import { UsedVouchers } from './pages/UsedVouchers'
 import { AddVoucher } from './pages/AddVoucher'
 import { EditVoucher } from './pages/EditVoucher'
 import { ClaimShare } from './pages/ClaimShare'
+import { ClaimShareBundle } from './pages/ClaimShareBundle'
 import { Account } from './pages/Account'
 
 function App() {
@@ -39,6 +40,7 @@ function App() {
             <Route path="/add" element={<AddVoucher />} />
             <Route path="/edit/:id" element={<EditVoucher />} />
             <Route path="/claim/:token" element={<ClaimShare />} />
+            <Route path="/claim-all/:token" element={<ClaimShareBundle />} />
             <Route path="/account" element={<Account />} />
           </Route>
         </Routes>
