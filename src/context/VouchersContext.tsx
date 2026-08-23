@@ -35,6 +35,7 @@ interface VouchersContextValue {
   createShareLink: (id: string) => Promise<{ url: string | null; error: string | null }>
   claimShare: (token: string) => Promise<ClaimResult>
   leaveShare: (id: string) => Promise<{ error: string | null }>
+  removeMember: (voucherId: string, userId: string) => Promise<{ error: string | null }>
   isOwner: (voucher: Voucher) => boolean
   memberCount: (id: string) => number
   shareParticipants: (id: string) => ShareParticipant[]
@@ -274,6 +275,20 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  /**
+   * Owner-only: revokes another account's access. This also invalidates every
+   * outstanding share link for the voucher, so the removed account cannot
+   * simply reuse the link it joined with.
+   */
+  async function removeMember(voucherId: string, userId: string) {
+    const { error } = await supabase.rpc('remove_voucher_member', {
+      p_voucher_id: voucherId,
+      p_user_id: userId,
+    })
+    if (!error) await refresh()
+    return { error: error?.message ?? null }
+  }
+
   /** Leaves a voucher shared with you. The owner's copy is untouched. */
   async function leaveShare(id: string) {
     const { error } = await supabase.rpc('leave_voucher_share', { p_voucher_id: id })
@@ -322,6 +337,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         createShareLink,
         claimShare,
         leaveShare,
+        removeMember,
         isOwner,
         memberCount,
         shareParticipants,

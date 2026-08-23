@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Voucher } from '../types'
-import { useVouchers } from '../context/VouchersContext'
+import { useVouchers, type ShareParticipant } from '../context/VouchersContext'
 import { useAuth } from '../context/AuthContext'
 import { ConfirmDialog } from './ConfirmDialog'
 import { ShareDialog } from './ShareDialog'
@@ -52,6 +52,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
     isOwner,
     memberCount,
     shareParticipants,
+    removeMember,
   } = useVouchers()
   const navigate = useNavigate()
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
@@ -60,6 +61,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
   const [sharing, setSharing] = useState(false)
   const [revealCode, setRevealCode] = useState(false)
   const [showSharedWith, setShowSharedWith] = useState(false)
+  const [removingMember, setRemovingMember] = useState<ShareParticipant | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   const { user } = useAuth()
@@ -142,6 +144,15 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
 
   const dialog = pending ? confirmCopy[pending] : null
 
+  async function handleRemoveMember() {
+    if (!removingMember) return
+    setBusy(true)
+    const { error } = await removeMember(voucher.id, removingMember.user_id)
+    setBusy(false)
+    setRemovingMember(null)
+    setActionError(error)
+  }
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       {photoUrl && (
@@ -150,55 +161,70 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="font-semibold text-slate-900">
-              {voucher.store_name}
-              {isShared && (
-                <span className="relative ms-2 inline-flex items-center gap-1 align-middle">
-                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                    {owner ? `משותף · ${others}` : 'שותפו איתכם'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowSharedWith((v) => !v)}
-                    aria-label="עם מי השובר משותף"
-                    aria-expanded={showSharedWith}
-                    title={sharedWithSummary}
-                    className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50"
-                  >
-                    i
-                  </button>
+            <h3 className="font-semibold text-slate-900">{voucher.store_name}</h3>
 
-                  {showSharedWith && (
-                    <>
-                      {/* Tap-away layer: a hover tooltip alone is unusable on a phone. */}
-                      <span
-                        className="fixed inset-0 z-10"
-                        onClick={() => setShowSharedWith(false)}
-                        aria-hidden="true"
-                      />
-                      <span className="absolute top-6 z-20 w-56 rounded-xl border border-slate-200 bg-white p-3 text-start shadow-lg end-0">
-                        <span className="block text-xs font-semibold text-slate-500">
-                          השובר משותף עם
-                        </span>
-                        <span className="mt-2 block space-y-1">
-                          {people.map((p) => (
-                            <span key={p.user_id} className="block break-all text-xs text-slate-700">
+            {isShared && (
+              <div className="relative mt-1 flex items-center gap-1">
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                  {owner ? `משותף · ${others}` : 'שותפו איתכם'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSharedWith((v) => !v)}
+                  aria-label="עם מי השובר משותף"
+                  aria-expanded={showSharedWith}
+                  title={sharedWithSummary}
+                  className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50"
+                >
+                  i
+                </button>
+
+                {showSharedWith && (
+                  <>
+                    {/* Tap-away layer: a hover tooltip alone is unusable on a phone. */}
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setShowSharedWith(false)}
+                      aria-hidden="true"
+                    />
+                    <div className="absolute top-7 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-start shadow-lg start-0">
+                      <p className="text-xs font-semibold text-slate-500">השובר משותף עם</p>
+                      <ul className="mt-2 space-y-1.5">
+                        {people.map((p) => (
+                          <li key={p.user_id} className="flex items-center justify-between gap-2">
+                            <span className="break-all text-xs text-slate-700">
                               {p.email}
-                              {p.is_owner && (
-                                <span className="ms-1 text-slate-400">(הבעלים)</span>
-                              )}
+                              {p.is_owner && <span className="ms-1 text-slate-400">(הבעלים)</span>}
                               {p.user_id === user?.id && (
                                 <span className="ms-1 text-slate-400">(אתם)</span>
                               )}
                             </span>
-                          ))}
-                        </span>
-                      </span>
-                    </>
-                  )}
-                </span>
-              )}
-            </h3>
+                            {owner && !p.is_owner && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowSharedWith(false)
+                                  setRemovingMember(p)
+                                }}
+                                aria-label={`הסרת ${p.email} מהשובר`}
+                                className="shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                              >
+                                הסרה
+                              </button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                      {owner && others > 0 && (
+                        <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] leading-snug text-slate-400">
+                          הסרת חשבון מבטלת גם את קישורי השיתוף הקיימים לשובר זה.
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <p className="text-sm text-slate-500">
               נוסף בתאריך {dateFormatter.format(new Date(voucher.created_at))}
               {voucher.used_at && ` · נוצל בתאריך ${dateFormatter.format(new Date(voucher.used_at))}`}
@@ -290,6 +316,19 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
           busy={busy}
           onConfirm={runPendingAction}
           onCancel={() => setPending(null)}
+        />
+      )}
+
+      {removingMember && (
+        <ConfirmDialog
+          open
+          title="להסיר את החשבון מהשובר?"
+          message={`${removingMember.email} לא יראה יותר את השובר של ${voucher.store_name}. כל קישורי השיתוף הקיימים לשובר זה יבוטלו, כדי שלא יהיה אפשר להצטרף איתם מחדש — תוכלו ליצור קישור חדש בכל עת.`}
+          confirmLabel="כן, להסיר"
+          tone="danger"
+          busy={busy}
+          onConfirm={handleRemoveMember}
+          onCancel={() => setRemovingMember(null)}
         />
       )}
 

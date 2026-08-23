@@ -26,7 +26,11 @@ A PWA for keeping track of gift cards, coupons, and other vouchers: store a code
 
 A shared voucher is **one row, not a copy per account**. `voucher_members` records who else holds it, and row-level security grants access to the owner plus every member. Because there is only one row, everything is shared by construction: the store name, code, amount, note, photo, and status are the same values for everyone, and an edit by any member is immediately visible to all.
 
-Ownership still governs two things. Only the owner can hand out share links, and only the owner can delete the voucher — deleting removes it for everyone. A member who no longer wants it calls `leave_voucher_share`, which drops their membership and leaves the voucher untouched for everyone else.
+Ownership still governs three things. Only the owner can hand out share links, only the owner can delete the voucher — deleting removes it for everyone — and only the owner can remove someone else's access, via `remove_voucher_member`. A member who no longer wants the voucher calls `leave_voucher_share` instead, which drops their own membership and leaves the voucher untouched for everyone else.
+
+Removing a member also **revokes every outstanding share link for that voucher**. Without that the removal would be cosmetic: the removed account almost certainly still holds the link it joined with, and links stay valid for 30 days, so it could simply rejoin. The owner can issue a fresh link afterwards for anyone who still needs one.
+
+The card shows who holds a shared voucher behind an `i` button. It opens a panel on tap rather than relying on hover, which does not exist on a phone, and carries the same list in a `title` attribute so desktop hover still works. The owner gets a remove control next to each member there. Addresses come from `voucher_share_participants`, which is security definer (reading `auth.users` needs elevated rights) and filters on `can_access_voucher`, so an address is only ever disclosed to someone who already shares that voucher.
 
 Photos live under the uploader's own folder in the private bucket, so uploading and deleting a file remain operations on your own storage. Read access instead follows the voucher: `photo_is_accessible` grants a signed URL to anyone who can see the voucher the photo belongs to.
 

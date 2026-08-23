@@ -260,6 +260,90 @@ exception when others then
 end;
 $$;
 
+-- Removing an account from a shared voucher. Self-contained: its own users,
+-- cleaned up at the end, so it does not depend on the state left above.
+do $$
+declare
+  a uuid := gen_random_uuid();
+  b uuid := gen_random_uuid();
+  c uuid := gen_random_uuid();
+  vid uuid;
+  tok uuid;
+  ok boolean;
+  txt text;
+begin
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
+                          email_confirmed_at, created_at, updated_at,
+                          raw_app_meta_data, raw_user_meta_data)
+  select u.id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+         'voucher-test-' || u.id || '@example.test', 'x', now(), now(), now(),
+         '{}'::jsonb, '{}'::jsonb
+  from (values (a), (b), (c)) as u(id);
+
+  perform set_config('request.jwt.claims', json_build_object('sub', a)::text, false);
+  insert into public.vouchers (user_id, store_name, code)
+  values (a, 'Removal Test', 'RM-TEST-1') returning id into vid;
+  tok := public.create_voucher_share(vid);
+
+  perform set_config('request.jwt.claims', json_build_object('sub', b)::text, false);
+  perform public.claim_voucher_share(tok);
+
+  ok := false;
+  begin
+    perform public.remove_voucher_member(vid, a);
+  exception when others then ok := true; txt := sqlerrm; end;
+  insert into test_results (name, passed, detail)
+  values ('R1 SECURITY a member cannot remove anyone', ok, coalesce(txt, 'no exception'));
+
+  perform set_config('request.jwt.claims', json_build_object('sub', c)::text, false);
+  ok := false; txt := null;
+  begin
+    perform public.remove_voucher_member(vid, b);
+  exception when others then ok := true; txt := sqlerrm; end;
+  insert into test_results (name, passed, detail)
+  values ('R2 SECURITY a stranger cannot remove anyone', ok, coalesce(txt, 'no exception'));
+
+  perform set_config('request.jwt.claims', json_build_object('sub', a)::text, false);
+  ok := public.remove_voucher_member(vid, b);
+  insert into test_results (name, passed, detail)
+  values ('R3 the owner can remove a member', ok, format('removed=%s', ok));
+
+  perform set_config('request.jwt.claims', json_build_object('sub', b)::text, false);
+  insert into test_results (name, passed, detail)
+  values ('R4 the removed account loses access', not public.can_access_voucher(vid),
+          format('can_access=%s', public.can_access_voucher(vid)));
+
+  ok := false; txt := null;
+  begin
+    perform public.claim_voucher_share(tok);
+  exception when others then ok := true; txt := sqlerrm; end;
+  insert into test_results (name, passed, detail)
+  values ('R5 SECURITY the old share link is revoked, so no rejoining', ok,
+          coalesce(txt, 'no exception — the removed account could rejoin'));
+
+  perform set_config('request.jwt.claims', json_build_object('sub', a)::text, false);
+  ok := false; txt := null;
+  begin
+    perform public.remove_voucher_member(vid, a);
+  exception when others then ok := true; txt := sqlerrm; end;
+  insert into test_results (name, passed, detail)
+  values ('R6 the owner cannot remove themselves', ok, coalesce(txt, 'no exception'));
+
+  insert into test_results (name, passed, detail)
+  values ('R7 the voucher itself survives the removal',
+          (select count(*) from public.vouchers where id = vid) = 1,
+          format('rows=%s', (select count(*) from public.vouchers where id = vid)));
+
+  delete from auth.users where id in (a, b, c);
+  perform set_config('request.jwt.claims', '', false);
+exception when others then
+  delete from auth.users where id in (a, b, c);
+  perform set_config('request.jwt.claims', '', false);
+  insert into test_results (name, passed, detail)
+  values ('FATAL: removal tests aborted', false, sqlerrm);
+end;
+$$;
+
 do $$
 declare
   strays integer;
