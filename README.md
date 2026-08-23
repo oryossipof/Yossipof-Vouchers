@@ -63,6 +63,30 @@ Two properties keep a link from reaching further than the pair that agreed to it
 
 Linking goes through an invite token sent as `/link/:token`, and that token is deliberately more restricted than a voucher share link: single use, seven days, and minting a new one deletes the previous invite, so a token pasted into a chat months ago cannot come back to life. Either side can cut the link at any time from `/account`; the vouchers each of them added stay with their owner.
 
+### A policy must not ask the table about the row it is holding
+
+`0012_fix_insert_returning.sql` fixes a bug that made **adding a voucher fail
+outright** between `0006` and `0012`. The client saves with
+`.insert(...).select().single()`, which PostgREST sends as
+`INSERT ... RETURNING`, and Postgres applies the *SELECT* policy to the row
+being returned. That policy was `can_access_voucher(id)` — a `STABLE` security
+definer function whose body queries `public.vouchers`. A subquery cannot see
+the row its own command is inserting, so the check answered false for the row
+that had just been created and the save came back as `42501 new row violates
+row-level security policy`.
+
+Two things hid it. The insert itself was always permitted — only the RETURNING
+half failed — and the SQL suites all run inside `DO` blocks as the table owner,
+where row-level security is bypassed. It took driving the real app in a browser
+to see it at all, which is why `supabase/tests/insert_returning_test.sql` now
+exercises this path under the actual `authenticated` role.
+
+The policy now decides ownership and the account link from the row's own
+`user_id`, which the policy expression already has, and only falls back to a
+lookup for the shared-with-you case, which always concerns a row that exists.
+The general lesson: a policy that references its own table in a subquery is a
+trap on INSERT.
+
 ### Security model
 
 `0004_harden_sharing.sql` establishes the rules that make sharing safe:
@@ -100,6 +124,7 @@ Run the SQL in `supabase/migrations/` against your Supabase project, in order, v
 - `0004`–`0009` — sharing hardening, storage hardening, the shared-row model, Realtime, the participant list, and member removal
 - `0010_share_all_vouchers.sql` — adds `voucher_shares.bundle_token` and the `create_voucher_share_bundle` / `claim_voucher_share_bundle` functions behind "share all"
 - `0011_account_links.sql` — adds `account_links` / `account_link_invites`, `can_manage_voucher`, and the invite, accept, and unlink functions behind linked accounts
+- `0012_fix_insert_returning.sql` — rewrites the voucher SELECT policy so `INSERT ... RETURNING` works; see below
 
 ## Live updates
 
