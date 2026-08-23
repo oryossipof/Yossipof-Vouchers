@@ -6,6 +6,13 @@ import { duplicateMessage, findVoucherByCode as findByCode } from '../lib/vouche
 
 export type ClaimOutcome = 'joined' | 'already_member' | 'own_voucher'
 
+export interface ShareParticipant {
+  voucher_id: string
+  user_id: string
+  email: string
+  is_owner: boolean
+}
+
 export interface ClaimResult {
   error: string | null
   outcome: ClaimOutcome | null
@@ -30,6 +37,7 @@ interface VouchersContextValue {
   leaveShare: (id: string) => Promise<{ error: string | null }>
   isOwner: (voucher: Voucher) => boolean
   memberCount: (id: string) => number
+  shareParticipants: (id: string) => ShareParticipant[]
   getPhotoUrl: (photoPath: string) => Promise<string | null>
   refresh: (silent?: boolean) => Promise<void>
 }
@@ -39,7 +47,7 @@ const VouchersContext = createContext<VouchersContextValue | undefined>(undefine
 export function VouchersProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [vouchers, setVouchers] = useState<Voucher[]>([])
-  const [shareCounts, setShareCounts] = useState<Record<string, number>>({})
+  const [participants, setParticipants] = useState<Record<string, ShareParticipant[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,24 +58,27 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     if (!silent) setLoading(true)
 
     // RLS returns vouchers you own plus vouchers shared with you, so this is
-    // the whole visible set. The counts say how many other accounts hold each.
-    const [{ data, error }, { data: counts }] = await Promise.all([
+    // the whole visible set. Participants say which accounts hold each one.
+    const [{ data, error }, { data: people }] = await Promise.all([
       supabase.from('vouchers').select('*').order('created_at', { ascending: true }),
-      supabase.rpc('voucher_share_counts'),
+      supabase.rpc('voucher_share_participants'),
     ])
 
     if (error) setError(error.message)
     else setVouchers(data as Voucher[])
 
-    if (Array.isArray(counts)) {
-      setShareCounts(
-        Object.fromEntries(
-          (counts as { voucher_id: string; member_count: number }[]).map((c) => [
-            c.voucher_id,
-            c.member_count,
-          ])
+    if (Array.isArray(people)) {
+      const grouped: Record<string, ShareParticipant[]> = {}
+      for (const p of people as ShareParticipant[]) {
+        ;(grouped[p.voucher_id] ??= []).push(p)
+      }
+      // Owner first, then members alphabetically, so the list is stable.
+      for (const list of Object.values(grouped)) {
+        list.sort((a, b) =>
+          a.is_owner === b.is_owner ? a.email.localeCompare(b.email) : a.is_owner ? -1 : 1
         )
-      )
+      }
+      setParticipants(grouped)
     }
 
     if (!silent) setLoading(false)
@@ -274,8 +285,12 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     return voucher.user_id === user?.id
   }
 
+  function shareParticipants(id: string) {
+    return participants[id] ?? []
+  }
+
   function memberCount(id: string) {
-    return shareCounts[id] ?? 0
+    return shareParticipants(id).filter((p) => !p.is_owner).length
   }
 
   async function getPhotoUrl(photoPath: string) {
@@ -309,6 +324,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         leaveShare,
         isOwner,
         memberCount,
+        shareParticipants,
         getPhotoUrl,
         refresh,
       }}

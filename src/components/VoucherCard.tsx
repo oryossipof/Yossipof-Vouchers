@@ -43,19 +43,33 @@ function TrashIcon() {
 }
 
 export function VoucherCard({ voucher }: { voucher: Voucher }) {
-  const { getPhotoUrl, markAsUsed, markAsActive, removeVoucher, leaveShare, isOwner, memberCount } =
-    useVouchers()
+  const {
+    getPhotoUrl,
+    markAsUsed,
+    markAsActive,
+    removeVoucher,
+    leaveShare,
+    isOwner,
+    memberCount,
+    shareParticipants,
+  } = useVouchers()
   const navigate = useNavigate()
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<PendingAction>(null)
   const [sharing, setSharing] = useState(false)
   const [revealCode, setRevealCode] = useState(false)
+  const [showSharedWith, setShowSharedWith] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  useAuth()
+  const { user } = useAuth()
   const owner = isOwner(voucher)
   const others = memberCount(voucher.id)
+  const people = shareParticipants(voucher.id)
+  // Also used as the title attribute, so desktop hover works without a tap.
+  const sharedWithSummary = people.length
+    ? `משותף עם: ${people.map((p) => p.email).join(', ')}`
+    : 'עם מי השובר משותף'
   // The voucher is a single shared row, so it counts as shared either when
   // someone else has joined it or when you are the one who joined.
   const isShared = others > 0 || !owner
@@ -139,8 +153,49 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
             <h3 className="font-semibold text-slate-900">
               {voucher.store_name}
               {isShared && (
-                <span className="ms-2 rounded-full bg-emerald-50 px-2 py-0.5 align-middle text-xs font-medium text-emerald-700">
-                  {owner ? `משותף · ${others}` : 'שותפו איתכם'}
+                <span className="relative ms-2 inline-flex items-center gap-1 align-middle">
+                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                    {owner ? `משותף · ${others}` : 'שותפו איתכם'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowSharedWith((v) => !v)}
+                    aria-label="עם מי השובר משותף"
+                    aria-expanded={showSharedWith}
+                    title={sharedWithSummary}
+                    className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50"
+                  >
+                    i
+                  </button>
+
+                  {showSharedWith && (
+                    <>
+                      {/* Tap-away layer: a hover tooltip alone is unusable on a phone. */}
+                      <span
+                        className="fixed inset-0 z-10"
+                        onClick={() => setShowSharedWith(false)}
+                        aria-hidden="true"
+                      />
+                      <span className="absolute top-6 z-20 w-56 rounded-xl border border-slate-200 bg-white p-3 text-start shadow-lg end-0">
+                        <span className="block text-xs font-semibold text-slate-500">
+                          השובר משותף עם
+                        </span>
+                        <span className="mt-2 block space-y-1">
+                          {people.map((p) => (
+                            <span key={p.user_id} className="block break-all text-xs text-slate-700">
+                              {p.email}
+                              {p.is_owner && (
+                                <span className="ms-1 text-slate-400">(הבעלים)</span>
+                              )}
+                              {p.user_id === user?.id && (
+                                <span className="ms-1 text-slate-400">(אתם)</span>
+                              )}
+                            </span>
+                          ))}
+                        </span>
+                      </span>
+                    </>
+                  )}
                 </span>
               )}
             </h3>
