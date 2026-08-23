@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node C:/Users/USER/AppData/Local/Temp/claude/C--VoucherManagement/bfe784c7-42dd-4d69-aae7-5d02050cf65d/scratchpad/probe.cjs:*)"
+    ]
+  }
+}
