@@ -24,22 +24,26 @@ A PWA for keeping track of gift cards, coupons, and other vouchers: store a code
 
 ## How sharing works
 
-Sharing a voucher calls `create_voucher_share`, which stamps the voucher with a `share_group_id` and returns a one-off token. The share link (`/claim/:token`) is sent through WhatsApp; when the recipient opens it while signed in, `claim_voucher_share` copies the voucher into their account with the same `share_group_id`. If they already hold a voucher with the same code, that existing voucher is joined to the share group instead of being duplicated.
+A shared voucher is **one row, not a copy per account**. `voucher_members` records who else holds it, and row-level security grants access to the owner plus every member. Because there is only one row, everything is shared by construction: the store name, code, amount, note, photo, and status are the same values for everyone, and an edit by any member is immediately visible to all.
 
-From then on, status changes go through `set_voucher_status`, which updates every voucher in the share group — so "used" in one account means "used" in all of them. Each account still keeps its own photo, note edits, and its own delete: deleting your copy does not remove anyone else's.
+Ownership still governs two things. Only the owner can hand out share links, and only the owner can delete the voucher — deleting removes it for everyone. A member who no longer wants it calls `leave_voucher_share`, which drops their membership and leaves the voucher untouched for everyone else.
 
-The three functions are `security definer` and check `auth.uid()` themselves, which is what lets a status change reach rows that row-level security would otherwise hide. The `voucher_shares` table has RLS enabled with no policies, so tokens are reachable only through those functions and cannot be enumerated.
+Photos live under the uploader's own folder in the private bucket, so uploading and deleting a file remain operations on your own storage. Read access instead follows the voucher: `photo_is_accessible` grants a signed URL to anyone who can see the voucher the photo belongs to.
 
-Note: photos are stored per user in a private bucket, so a shared voucher arrives without the original photo. The recipient can attach their own.
+### The flow
+
+`create_voucher_share` returns a one-off token, which the owner sends through WhatsApp as `/claim/:token`. When the recipient opens it while signed in, `claim_voucher_share` adds them to `voucher_members` — it does not copy anything. Status changes go through `set_voucher_status` because `status` is not client-writable, and the functions are `security definer` so they can act on the single shared row.
+
+Migrations `0003`–`0005` built an earlier model in which a share produced one copy per account and only status propagated; `0006` replaced it, folding existing copies into the shared row and preserving any field the originator had left empty. Rows removed by that merge are kept in `public.vouchers_pre_0006_backup`, which can be dropped once the new model has been exercised.
 
 ### Security model
 
 `0004_harden_sharing.sql` establishes the rules that make sharing safe:
 
-- **Clients cannot write `status`, `used_at`, `share_group_id`, or `share_origin`.** The `authenticated` role holds column-level INSERT/UPDATE on the editable fields only; those four move exclusively through the security definer functions. Without this a share group id would be a permanent bearer credential — anyone who ever learned one could re-join the group and flip other people's vouchers, bypassing `set_voucher_status` and surviving any attempt to unshare.
-- **Only the originator may hand out share links.** `share_origin` records who started a group; `create_voucher_share` refuses if the caller is not that person. Holding a copy is not the right to widen access to it.
-- **Claiming never silently absorbs an existing voucher.** If the claimer already has a voucher with the same code, `claim_voucher_share` returns `code_conflict` and changes nothing. Linking the two is a separate, explicitly confirmed call to `link_voucher_to_share`. Otherwise, sending someone a link for a guessed code would let you seize control of an unrelated voucher in their account.
+- **Clients cannot write `status` or `used_at`.** The `authenticated` role holds column-level INSERT/UPDATE on the editable fields only; status moves exclusively through `set_voucher_status`. Under the old copy model this also covered `share_group_id`, without which a group id would have been a permanent bearer credential — anyone who ever learned one could re-join the group and flip other people's vouchers. `0006` removed that column entirely; membership is now an explicit table that clients cannot insert into.
+- **Only the owner may hand out share links**, and only the owner may delete. Being a member lets you edit and use the voucher, not widen access to it or destroy it for everyone else.
 - **Share links expire after 30 days**, and `voucher_shares` has RLS enabled with no policies, so tokens are reachable only through the functions and cannot be enumerated.
+- **Membership is not self-serve.** `voucher_members` grants `select` only; rows are created solely by `claim_voucher_share` against a valid unexpired token, and removed by `leave_voucher_share` for yourself.
 
 `0005_storage_hardening.sql` covers uploads: the `voucher-photos` bucket enforces a 5 MB limit and an image-only MIME allowlist server-side (the form's `accept="image/*"` is only a hint and is bypassable). `image/svg+xml` is deliberately excluded, since SVG can carry executable script that would run when the file is opened through a signed URL. The object policies are scoped to the `authenticated` role, and the upload path sanitises the file extension so a crafted filename cannot steer the storage key.
 

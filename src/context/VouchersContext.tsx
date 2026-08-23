@@ -4,7 +4,7 @@ import type { VoucherFormInput, Voucher, VoucherStatus } from '../types'
 import { useAuth } from './AuthContext'
 import { duplicateMessage, findVoucherByCode as findByCode } from '../lib/vouchers'
 
-export type ClaimOutcome = 'created' | 'already_in_group' | 'own_voucher' | 'code_conflict'
+export type ClaimOutcome = 'joined' | 'already_member' | 'own_voucher'
 
 export interface ClaimResult {
   error: string | null
@@ -27,7 +27,9 @@ interface VouchersContextValue {
   getVoucher: (id: string) => Voucher | null
   createShareLink: (id: string) => Promise<{ url: string | null; error: string | null }>
   claimShare: (token: string) => Promise<ClaimResult>
-  linkShare: (token: string, voucherId: string) => Promise<{ error: string | null }>
+  leaveShare: (id: string) => Promise<{ error: string | null }>
+  isOwner: (voucher: Voucher) => boolean
+  memberCount: (id: string) => number
   getPhotoUrl: (photoPath: string) => Promise<string | null>
   refresh: () => Promise<void>
 }
@@ -37,18 +39,35 @@ const VouchersContext = createContext<VouchersContextValue | undefined>(undefine
 export function VouchersProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [vouchers, setVouchers] = useState<Voucher[]>([])
+  const [shareCounts, setShareCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     if (!user) return
     setLoading(true)
-    const { data, error } = await supabase
-      .from('vouchers')
-      .select('*')
-      .order('created_at', { ascending: true })
+
+    // RLS returns vouchers you own plus vouchers shared with you, so this is
+    // the whole visible set. The counts say how many other accounts hold each.
+    const [{ data, error }, { data: counts }] = await Promise.all([
+      supabase.from('vouchers').select('*').order('created_at', { ascending: true }),
+      supabase.rpc('voucher_share_counts'),
+    ])
+
     if (error) setError(error.message)
     else setVouchers(data as Voucher[])
+
+    if (Array.isArray(counts)) {
+      setShareCounts(
+        Object.fromEntries(
+          (counts as { voucher_id: string; member_count: number }[]).map((c) => [
+            c.voucher_id,
+            c.member_count,
+          ])
+        )
+      )
+    }
+
     setLoading(false)
   }, [user])
 
@@ -207,14 +226,19 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  /** Explicit opt-in merge, after claimShare reported a code_conflict. */
-  async function linkShare(token: string, voucherId: string) {
-    const { error } = await supabase.rpc('link_voucher_to_share', {
-      p_token: token,
-      p_voucher_id: voucherId,
-    })
+  /** Leaves a voucher shared with you. The owner's copy is untouched. */
+  async function leaveShare(id: string) {
+    const { error } = await supabase.rpc('leave_voucher_share', { p_voucher_id: id })
     if (!error) await refresh()
     return { error: error?.message ?? null }
+  }
+
+  function isOwner(voucher: Voucher) {
+    return voucher.user_id === user?.id
+  }
+
+  function memberCount(id: string) {
+    return shareCounts[id] ?? 0
   }
 
   async function getPhotoUrl(photoPath: string) {
@@ -245,7 +269,9 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         getVoucher,
         createShareLink,
         claimShare,
-        linkShare,
+        leaveShare,
+        isOwner,
+        memberCount,
         getPhotoUrl,
         refresh,
       }}

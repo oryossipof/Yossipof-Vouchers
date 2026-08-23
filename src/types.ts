@@ -2,6 +2,7 @@ export type VoucherStatus = 'active' | 'used'
 
 export interface Voucher {
   id: string
+  /** The owner. Everyone else with access is a member of the share. */
   user_id: string
   store_name: string
   code: string
@@ -9,8 +10,6 @@ export interface Voucher {
   note: string | null
   photo_path: string | null
   status: VoucherStatus
-  share_group_id: string | null
-  share_origin: string | null
   created_at: string
   used_at: string | null
 }

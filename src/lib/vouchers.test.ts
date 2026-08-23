@@ -12,8 +12,6 @@ function voucher(overrides: Partial<Voucher> = {}): Voucher {
     note: null,
     photo_path: null,
     status: 'active',
-    share_group_id: null,
-    share_origin: null,
     created_at: '2026-01-01T00:00:00Z',
     used_at: null,
     ...overrides,

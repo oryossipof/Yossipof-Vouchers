@@ -43,7 +43,8 @@ function TrashIcon() {
 }
 
 export function VoucherCard({ voucher }: { voucher: Voucher }) {
-  const { getPhotoUrl, markAsUsed, markAsActive, removeVoucher } = useVouchers()
+  const { getPhotoUrl, markAsUsed, markAsActive, removeVoucher, leaveShare, isOwner, memberCount } =
+    useVouchers()
   const navigate = useNavigate()
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -52,11 +53,14 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
   const [revealCode, setRevealCode] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const { user } = useAuth()
-  const isShared = Boolean(voucher.share_group_id)
-  // Only whoever started the share may hand out further links; holding a copy
-  // is not the right to widen access to it.
-  const canShare = !isShared || voucher.share_origin === user?.id
+  useAuth()
+  const owner = isOwner(voucher)
+  const others = memberCount(voucher.id)
+  // The voucher is a single shared row, so it counts as shared either when
+  // someone else has joined it or when you are the one who joined.
+  const isShared = others > 0 || !owner
+  // Only the owner hands out links, and only the owner can delete for everyone.
+  const canShare = owner
 
   useEffect(() => {
     let cancelled = false
@@ -80,7 +84,9 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
         ? await markAsUsed(voucher.id)
         : pending === 'active'
           ? await markAsActive(voucher.id)
-          : await removeVoucher(voucher.id, voucher.photo_path)
+          : owner
+            ? await removeVoucher(voucher.id, voucher.photo_path)
+            : await leaveShare(voucher.id)
     setBusy(false)
     setPending(null)
     setActionError(error)
@@ -103,12 +109,21 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
       confirmLabel: 'כן, להחזיר',
       tone: 'primary' as const,
     },
-    delete: {
-      title: 'למחוק את השובר?',
-      message: `השובר של ${voucher.store_name} יימחק מהחשבון שלכם לצמיתות. לא ניתן לשחזר פעולה זו.`,
-      confirmLabel: 'כן, למחוק',
-      tone: 'danger' as const,
-    },
+    delete: owner
+      ? {
+          title: 'למחוק את השובר?',
+          message: isShared
+            ? `השובר של ${voucher.store_name} יימחק לצמיתות — גם מהחשבונות שהוא משותף איתם. לא ניתן לשחזר פעולה זו.`
+            : `השובר של ${voucher.store_name} יימחק לצמיתות. לא ניתן לשחזר פעולה זו.`,
+          confirmLabel: 'כן, למחוק',
+          tone: 'danger' as const,
+        }
+      : {
+          title: 'להסיר את השובר מהחשבון שלכם?',
+          message: `השובר של ${voucher.store_name} שותף איתכם. הוא יוסר מהרשימה שלכם, אך יישאר אצל הבעלים ואצל שאר החשבונות.`,
+          confirmLabel: 'כן, להסיר',
+          tone: 'danger' as const,
+        },
   }
 
   const dialog = pending ? confirmCopy[pending] : null
@@ -125,7 +140,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
               {voucher.store_name}
               {isShared && (
                 <span className="ms-2 rounded-full bg-emerald-50 px-2 py-0.5 align-middle text-xs font-medium text-emerald-700">
-                  משותף
+                  {owner ? `משותף · ${others}` : 'שותפו איתכם'}
                 </span>
               )}
             </h3>
@@ -201,8 +216,8 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
           <button
             onClick={() => setPending('delete')}
             disabled={busy}
-            aria-label="מחיקת השובר"
-            title="מחיקה"
+            aria-label={owner ? 'מחיקת השובר' : 'הסרת השובר מהחשבון שלכם'}
+            title={owner ? 'מחיקה' : 'הסרה'}
             className={`${iconButtonClass} hover:border-red-200 hover:bg-red-50 hover:text-red-600`}
           >
             <TrashIcon />

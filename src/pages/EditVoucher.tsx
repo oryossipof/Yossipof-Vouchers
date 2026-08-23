@@ -5,7 +5,7 @@ import type { VoucherFormInput } from '../types'
 
 export function EditVoucher() {
   const { id } = useParams<{ id: string }>()
-  const { getVoucher, updateVoucher, loading } = useVouchers()
+  const { getVoucher, updateVoucher, loading, isOwner, memberCount } = useVouchers()
   const navigate = useNavigate()
 
   const voucher = id ? getVoucher(id) : null
@@ -33,9 +33,10 @@ export function EditVoucher() {
   return (
     <div>
       <h1 className="mb-4 text-lg font-semibold text-slate-900">עריכת שובר</h1>
-      {voucher.share_group_id && (
+      {(memberCount(voucher.id) > 0 || !isOwner(voucher)) && (
         <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          שובר זה משותף. שינויים בפרטים חלים על העותק שלכם בלבד; סימון כנוצל חל על כל החשבונות.
+          שובר זה משותף. כל שינוי כאן — שם, קוד, סכום, הערה או תמונה — יופיע מיד בכל החשבונות
+          שהשובר משותף איתם.
         </p>
       )}
       <VoucherForm
