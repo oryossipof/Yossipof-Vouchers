@@ -13,6 +13,21 @@ export interface ShareParticipant {
   is_owner: boolean
 }
 
+/** An account linked to this one: the two keep a single joint collection. */
+export interface LinkedAccount {
+  user_id: string
+  email: string
+  linked_at: string
+}
+
+export type LinkOutcome = 'linked' | 'already_linked' | 'own_invite'
+
+export interface LinkClaimResult {
+  error: string | null
+  outcome: LinkOutcome | null
+  email: string | null
+}
+
 export interface ClaimResult {
   error: string | null
   outcome: ClaimOutcome | null
@@ -50,6 +65,12 @@ interface VouchersContextValue {
   leaveShare: (id: string) => Promise<{ error: string | null }>
   removeMember: (voucherId: string, userId: string) => Promise<{ error: string | null }>
   isOwner: (voucher: Voucher) => boolean
+  canManage: (voucher: Voucher) => boolean
+  linkedAccounts: LinkedAccount[]
+  isLinked: (userId: string) => boolean
+  createAccountLinkInvite: () => Promise<{ url: string | null; error: string | null }>
+  acceptAccountLinkInvite: (token: string) => Promise<LinkClaimResult>
+  removeAccountLink: (userId: string) => Promise<{ error: string | null }>
   memberCount: (id: string) => number
   shareParticipants: (id: string) => ShareParticipant[]
   getPhotoUrl: (photoPath: string) => Promise<string | null>
@@ -62,6 +83,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [vouchers, setVouchers] = useState<Voucher[]>([])
   const [participants, setParticipants] = useState<Record<string, ShareParticipant[]>>({})
+  const [linkedAccounts, setLinkedAccounts] = useState<LinkedAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -71,11 +93,13 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     if (!user) return
     if (!silent) setLoading(true)
 
-    // RLS returns vouchers you own plus vouchers shared with you, so this is
-    // the whole visible set. Participants say which accounts hold each one.
-    const [{ data, error }, { data: people }] = await Promise.all([
+    // RLS returns vouchers you own, vouchers owned by a linked account, and
+    // vouchers shared with you one by one, so this is the whole visible set.
+    // Participants say which accounts hold each one.
+    const [{ data, error }, { data: people }, { data: linked }] = await Promise.all([
       supabase.from('vouchers').select('*').order('created_at', { ascending: true }),
       supabase.rpc('voucher_share_participants'),
+      supabase.rpc('linked_accounts'),
     ])
 
     if (error) setError(error.message)
@@ -93,6 +117,11 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         )
       }
       setParticipants(grouped)
+    }
+
+    if (Array.isArray(linked)) {
+      const accounts = linked as LinkedAccount[]
+      setLinkedAccounts([...accounts].sort((a, b) => a.email.localeCompare(b.email)))
     }
 
     if (!silent) setLoading(false)
@@ -119,6 +148,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
       .channel('voucher-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vouchers' }, nudge)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'voucher_members' }, nudge)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'account_links' }, nudge)
       .subscribe()
 
     // Realtime can miss events while a phone is asleep or offline, and this is
@@ -353,6 +383,55 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     return voucher.user_id === user?.id
   }
 
+  function isLinked(userId: string) {
+    return linkedAccounts.some((a) => a.user_id === userId)
+  }
+
+  /**
+   * Whether this account holds the owner's powers over a voucher: delete it,
+   * hand out share links, remove someone from a share. A linked account holds
+   * them too — that is what a link means. A voucher merely shared with you
+   * does not qualify; you can use and edit it, not dispose of it.
+   */
+  function canManage(voucher: Voucher) {
+    return isOwner(voucher) || isLinked(voucher.user_id)
+  }
+
+  /**
+   * An invite to link two accounts. Minting one retires any earlier invite
+   * from this account, so only the most recent link is live.
+   */
+  async function createAccountLinkInvite() {
+    const { data, error } = await supabase.rpc('create_account_link_invite')
+    if (error || !data) return { url: null, error: error?.message ?? 'יצירת קישור החיבור נכשלה' }
+    return { url: `${window.location.origin}/link/${data as string}`, error: null }
+  }
+
+  async function acceptAccountLinkInvite(token: string): Promise<LinkClaimResult> {
+    const { data, error } = await supabase.rpc('accept_account_link_invite', { p_token: token })
+    if (error) return { error: error.message, outcome: null, email: null }
+
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row) return { error: 'קישור החיבור אינו תקין.', outcome: null, email: null }
+
+    await refresh()
+
+    // The address comes from the refreshed link list rather than the RPC, so
+    // an account is never named to someone it is not actually linked with.
+    const { data: accounts } = await supabase.rpc('linked_accounts')
+    const match = (accounts as LinkedAccount[] | null)?.find(
+      (a) => a.user_id === row.linked_user
+    )
+
+    return { error: null, outcome: row.outcome as LinkOutcome, email: match?.email ?? null }
+  }
+
+  async function removeAccountLink(userId: string) {
+    const { error } = await supabase.rpc('remove_account_link', { p_user_id: userId })
+    if (!error) await refresh()
+    return { error: error?.message ?? null }
+  }
+
   function shareParticipants(id: string) {
     return participants[id] ?? []
   }
@@ -394,6 +473,12 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         leaveShare,
         removeMember,
         isOwner,
+        canManage,
+        linkedAccounts,
+        isLinked,
+        createAccountLinkInvite,
+        acceptAccountLinkInvite,
+        removeAccountLink,
         memberCount,
         shareParticipants,
         getPhotoUrl,

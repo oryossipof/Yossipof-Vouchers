@@ -6,7 +6,7 @@ import { ShareAllDialog } from '../components/ShareAllDialog'
 import { StoreSearchInput } from '../components/StoreSearchInput'
 
 export function Dashboard() {
-  const { active, loading, error, isOwner } = useVouchers()
+  const { active, loading, error, canManage } = useVouchers()
   const [query, setQuery] = useState('')
   const [sharingAll, setSharingAll] = useState(false)
 
@@ -15,38 +15,45 @@ export function Dashboard() {
 
   // "Share all" follows whatever the list is currently showing, so a search
   // doubles as a way to share just part of the collection. Only vouchers you
-  // own can go out: a voucher shared *with* you stays with its owner to pass on.
-  const shareable = filtered.filter(isOwner)
+  // own — or that a linked account owns — can go out: a voucher merely shared
+  // *with* you stays with its owner to pass on.
+  const shareable = filtered.filter(canManage)
   const excludedCount = filtered.length - shareable.length
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-slate-900">שוברים פעילים</h1>
-        <Link
-          to="/add"
-          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          + הוספה
-        </Link>
+        {/* In RTL the first child sits furthest right, so "share all" lands to
+            the right of the add button, as one pair of actions. */}
+        <div className="flex items-center gap-2">
+          {/* One voucher already has a share button on its own card; this is
+              for sending the whole list in a single message. */}
+          {shareable.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setSharingAll(true)}
+              title={
+                searching
+                  ? `שיתוף ${shareable.length} השוברים שמופיעים כאן`
+                  : `שיתוף כל ${shareable.length} השוברים בוואטסאפ`
+              }
+              className="flex items-center gap-1 whitespace-nowrap rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+            >
+              <span aria-hidden="true">💬</span>
+              שיתוף הכל ({shareable.length})
+            </button>
+          )}
+          <Link
+            to="/add"
+            className="whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            + הוספה
+          </Link>
+        </div>
       </div>
 
       {active.length > 0 && <StoreSearchInput value={query} onChange={setQuery} />}
-
-      {/* One voucher already has a share button on its own card; this is for
-          sending the whole list in a single message. */}
-      {shareable.length > 1 && (
-        <button
-          type="button"
-          onClick={() => setSharingAll(true)}
-          className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
-        >
-          <span aria-hidden="true">💬</span>
-          {searching
-            ? `שיתוף ${shareable.length} השוברים שמופיעים כאן`
-            : `שיתוף כל ${shareable.length} השוברים בוואטסאפ`}
-        </button>
-      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {loading && <p className="text-sm text-slate-500">טוען…</p>}

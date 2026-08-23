@@ -50,6 +50,9 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
     removeVoucher,
     leaveShare,
     isOwner,
+    canManage,
+    isLinked,
+    linkedAccounts,
     memberCount,
     shareParticipants,
     removeMember,
@@ -66,6 +69,10 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
 
   const { user } = useAuth()
   const owner = isOwner(voucher)
+  // A linked account is not a guest: it can do everything the owner can.
+  const manage = canManage(voucher)
+  const viaLink = !owner && isLinked(voucher.user_id)
+  const ownerEmail = linkedAccounts.find((a) => a.user_id === voucher.user_id)?.email
   const others = memberCount(voucher.id)
   const people = shareParticipants(voucher.id)
   // Also used as the title attribute, so desktop hover works without a tap.
@@ -73,10 +80,13 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
     ? `משותף עם: ${people.map((p) => p.email).join(', ')}`
     : 'עם מי השובר משותף'
   // The voucher is a single shared row, so it counts as shared either when
-  // someone else has joined it or when you are the one who joined.
-  const isShared = others > 0 || !owner
-  // Only the owner hands out links, and only the owner can delete for everyone.
-  const canShare = owner
+  // someone else has joined it or when you are the one who joined. A voucher
+  // reaching you through a linked account is not "shared with you" in that
+  // sense — it is part of the joint collection, and says so separately.
+  const isShared = others > 0 || (!owner && !viaLink)
+  // Handing out links and deleting for everyone are the owner's powers, held
+  // by a linked account too.
+  const canShare = manage
 
   useEffect(() => {
     let cancelled = false
@@ -100,7 +110,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
         ? await markAsUsed(voucher.id)
         : pending === 'active'
           ? await markAsActive(voucher.id)
-          : owner
+          : manage
             ? await removeVoucher(voucher.id, voucher.photo_path)
             : await leaveShare(voucher.id)
     setBusy(false)
@@ -125,7 +135,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
       confirmLabel: 'כן, להחזיר',
       tone: 'primary' as const,
     },
-    delete: owner
+    delete: manage
       ? {
           title: 'למחוק את השובר?',
           message: isShared
@@ -175,10 +185,19 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
                 store name is long. */}
               <h3 className="font-semibold text-slate-900">
                 {voucher.store_name}
+                {viaLink && (
+                  <span
+                    title={`השובר נוסף על ידי ${ownerEmail ?? 'החשבון המקושר'}`}
+                    className="ms-2 inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 align-middle text-xs font-medium text-sky-700"
+                  >
+                    <span aria-hidden="true">🔗</span>
+                    חשבון מקושר
+                  </span>
+                )}
                 {isShared && (
                   <span className="ms-2 inline-flex items-center gap-1 align-middle">
                     <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                      {owner ? `משותף · ${others}` : 'שותפו איתכם'}
+                      {manage ? `משותף · ${others}` : 'שותפו איתכם'}
                     </span>
                     <button
                       type="button"
@@ -218,7 +237,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
                                   <span className="ms-1 text-slate-400">(אתם)</span>
                                 )}
                               </span>
-                              {owner && !p.is_owner && (
+                              {manage && !p.is_owner && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -234,7 +253,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
                             </li>
                           ))}
                         </ul>
-                        {owner && others > 0 && (
+                        {manage && others > 0 && (
                           <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] leading-snug text-slate-400">
                             הסרת חשבון מבטלת גם את קישורי השיתוף הקיימים לשובר זה.
                           </p>
@@ -315,8 +334,8 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
           <button
             onClick={() => setPending('delete')}
             disabled={busy}
-            aria-label={owner ? 'מחיקת השובר' : 'הסרת השובר מהחשבון שלכם'}
-            title={owner ? 'מחיקה' : 'הסרה'}
+            aria-label={manage ? 'מחיקת השובר' : 'הסרת השובר מהחשבון שלכם'}
+            title={manage ? 'מחיקה' : 'הסרה'}
             className={`${iconButtonClass} hover:border-red-200 hover:bg-red-50 hover:text-red-600`}
           >
             <TrashIcon />

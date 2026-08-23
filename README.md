@@ -19,6 +19,7 @@ A PWA for keeping track of gift cards, coupons, and other vouchers: store a code
 - Confirmation dialog before marking a voucher as used, restoring it, or deleting it
 - Share a voucher via WhatsApp: the recipient opens the link and the voucher is added to their account
 - Share all of them at once: one link covering every active voucher you own, sent in a single WhatsApp message
+- Link two accounts into one joint collection: every add, edit, mark-as-used, and delete applies to both, with no per-voucher sharing
 - Shared vouchers stay in sync — marking one as used (or restoring it) applies to every account holding it
 - View used (redeemed) vouchers separately
 - Installable as a PWA with offline caching of the app shell
@@ -49,12 +50,25 @@ On the dashboard the button shares whatever the list is currently showing, so th
 
 Migrations `0003`–`0005` built an earlier model in which a share produced one copy per account and only status propagated; `0006` replaced it, folding existing copies into the shared row and preserving any field the originator had left empty. Rows removed by that merge are kept in `public.vouchers_pre_0006_backup`, which can be dropped once the new model has been exercised.
 
+## Linked accounts
+
+Per-voucher sharing answers "here, take this coupon." Two people keeping one wallet were asking something else, and had to re-share every coupon they added. A **link** is the standing version: once two accounts are linked, each sees and manages everything the other owns — adding, editing, marking used, and deleting all apply to both, with no per-voucher step.
+
+The two models compose. `can_manage_voucher` is the owner's set of powers — delete the voucher, hand out share links, remove someone from a share — and now answers true for a linked account as well; `can_access_voucher` is that plus the vouchers shared with you one by one. The client mirrors the split: `isOwner` stays literal, and `canManage` drives what the card lets you do.
+
+Two properties keep a link from reaching further than the pair that agreed to it, and both are covered by `supabase/tests/account_links_test.sql`:
+
+- **A link passes on what an account owns, not what has been shared with it.** Otherwise linking with someone would hand you the vouchers of every stranger who ever shared one with them.
+- **Links are not transitive.** Being linked to B does not put you in A's collection just because B is.
+
+Linking goes through an invite token sent as `/link/:token`, and that token is deliberately more restricted than a voucher share link: single use, seven days, and minting a new one deletes the previous invite, so a token pasted into a chat months ago cannot come back to life. Either side can cut the link at any time from `/account`; the vouchers each of them added stay with their owner.
+
 ### Security model
 
 `0004_harden_sharing.sql` establishes the rules that make sharing safe:
 
 - **Clients cannot write `status` or `used_at`.** The `authenticated` role holds column-level INSERT/UPDATE on the editable fields only; status moves exclusively through `set_voucher_status`. Under the old copy model this also covered `share_group_id`, without which a group id would have been a permanent bearer credential — anyone who ever learned one could re-join the group and flip other people's vouchers. `0006` removed that column entirely; membership is now an explicit table that clients cannot insert into.
-- **Only the owner may hand out share links**, and only the owner may delete. Being a member lets you edit and use the voucher, not widen access to it or destroy it for everyone else.
+- **Only the owner may hand out share links**, and only the owner may delete. Being a member lets you edit and use the voucher, not widen access to it or destroy it for everyone else. Since `0011` an account linked to the owner holds these powers too — that is what a link is — but a member still does not.
 - **Share links expire after 30 days**, and `voucher_shares` has RLS enabled with no policies, so tokens are reachable only through the functions and cannot be enumerated.
 - **Membership is not self-serve.** `voucher_members` grants `select` only; rows are created solely by `claim_voucher_share` against a valid unexpired token, and removed by `leave_voucher_share` for yourself.
 
@@ -85,6 +99,7 @@ Run the SQL in `supabase/migrations/` against your Supabase project, in order, v
 - `0003_notes_sharing_status_sync.sql` — adds the `note` column, the `share_group_id` column, the `voucher_shares` table, and the `create_voucher_share` / `claim_voucher_share` / `set_voucher_status` functions
 - `0004`–`0009` — sharing hardening, storage hardening, the shared-row model, Realtime, the participant list, and member removal
 - `0010_share_all_vouchers.sql` — adds `voucher_shares.bundle_token` and the `create_voucher_share_bundle` / `claim_voucher_share_bundle` functions behind "share all"
+- `0011_account_links.sql` — adds `account_links` / `account_link_invites`, `can_manage_voucher`, and the invite, accept, and unlink functions behind linked accounts
 
 ## Live updates
 
@@ -99,6 +114,8 @@ Realtime can miss events while a phone is asleep or offline, and this is an inst
 ## Account
 
 `/account` shows the signed-in address and lets the user change their password. The current password is verified with `signInWithPassword` before `updateUser` is called: Supabase would accept the change on the strength of the session alone, so without that step anyone reaching an unlocked device could take over the account without knowing the existing password.
+
+It is also where linked accounts are managed: the page lists who this account is linked with and since when, offers a disconnect next to each, and mints the invite link described under [Linked accounts](#linked-accounts).
 
 ## Account recovery
 
