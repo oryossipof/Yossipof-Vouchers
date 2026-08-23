@@ -71,6 +71,20 @@ Run the SQL in `supabase/migrations/` against your Supabase project, in order, v
 - `0002_optional_amount.sql` — makes `amount` nullable
 - `0003_notes_sharing_status_sync.sql` — adds the `note` column, the `share_group_id` column, the `voucher_shares` table, and the `create_voucher_share` / `claim_voucher_share` / `set_voucher_status` functions
 
+## Live updates
+
+`0007` publishes `vouchers` and `voucher_members` to Supabase Realtime, so a change made on one device appears on the others without a reload — marking a voucher used, editing its details, joining or leaving a share.
+
+Both tables are set to `REPLICA IDENTITY FULL`. With the default (primary key only), an UPDATE or DELETE carries just the key, and Realtime cannot evaluate the row against the subscriber's RLS policy — members would silently receive nothing for vouchers they do not own, which is precisely the case that needs to work.
+
+The client refetches the visible set on any event rather than patching the changed row in place. That is deliberate: for deletes and for membership changes the payload alone does not say what the user should now be able to see. Events are debounced by 150 ms so a burst causes one refetch, and the refresh runs without the loading state so the list does not flicker while being read.
+
+Realtime can miss events while a phone is asleep or offline, and this is an installable PWA, so the app also re-syncs on `visibilitychange` and `online`.
+
+## Account
+
+`/account` shows the signed-in address and lets the user change their password. The current password is verified with `signInWithPassword` before `updateUser` is called: Supabase would accept the change on the strength of the session alone, so without that step anyone reaching an unlocked device could take over the account without knowing the existing password.
+
 ## Account recovery
 
 Two flows sit outside the protected routes:

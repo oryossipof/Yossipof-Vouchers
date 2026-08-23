@@ -31,7 +31,7 @@ interface VouchersContextValue {
   isOwner: (voucher: Voucher) => boolean
   memberCount: (id: string) => number
   getPhotoUrl: (photoPath: string) => Promise<string | null>
-  refresh: () => Promise<void>
+  refresh: (silent?: boolean) => Promise<void>
 }
 
 const VouchersContext = createContext<VouchersContextValue | undefined>(undefined)
@@ -43,9 +43,11 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => {
+  // `silent` skips the loading state, so live updates refresh the data without
+  // flashing a spinner over a list the user is already reading.
+  const refresh = useCallback(async (silent = false) => {
     if (!user) return
-    setLoading(true)
+    if (!silent) setLoading(true)
 
     // RLS returns vouchers you own plus vouchers shared with you, so this is
     // the whole visible set. The counts say how many other accounts hold each.
@@ -68,12 +70,47 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
       )
     }
 
-    setLoading(false)
+    if (!silent) setLoading(false)
   }, [user])
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // Live updates. Any change to a voucher you can see, or to who holds it,
+  // re-reads the visible set. Refetching rather than patching the row in place
+  // keeps this correct for deletes and for membership changes, where the
+  // payload alone does not say what the user should now be able to see.
+  useEffect(() => {
+    if (!user) return
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const nudge = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => refresh(true), 150)
+    }
+
+    const channel = supabase
+      .channel('voucher-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vouchers' }, nudge)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'voucher_members' }, nudge)
+      .subscribe()
+
+    // Realtime can miss events while a phone is asleep or offline, and this is
+    // an installable PWA, so re-sync whenever the app comes back to the front.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') nudge()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('online', nudge)
+
+    return () => {
+      clearTimeout(timer)
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', nudge)
+    }
+  }, [user, refresh])
 
   function findVoucherByCode(code: string, excludeId?: string) {
     return findByCode(vouchers, code, excludeId)

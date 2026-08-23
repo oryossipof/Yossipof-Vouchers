@@ -5,6 +5,7 @@ const navItems = [
   { to: '/', label: 'פעילים', icon: '🎟️' },
   { to: '/used', label: 'נוצלו', icon: '📦' },
   { to: '/add', label: 'הוספה', icon: '➕' },
+  { to: '/account', label: 'חשבון', icon: '⚙️' },
 ]
 
 export function Layout() {

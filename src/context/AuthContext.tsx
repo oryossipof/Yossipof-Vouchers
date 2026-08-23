@@ -13,6 +13,10 @@ interface AuthContextValue {
   sendPasswordReset: (email: string) => Promise<{ error: string | null }>
   verifyRecoveryLink: () => Promise<{ error: string | null }>
   updatePassword: (password: string) => Promise<{ error: string | null }>
+  changePassword: (
+    currentPassword: string,
+    newPassword: string
+  ) => Promise<{ error: string | null }>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -123,6 +127,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error ? translateAuthError(error.message) : null }
   }
 
+  /**
+   * Changes the password for a signed-in user. Supabase would accept
+   * updateUser({ password }) on the strength of the session alone, so the
+   * current password is verified first — otherwise anyone reaching an unlocked
+   * device could take the account over without knowing the existing password.
+   */
+  async function changePassword(currentPassword: string, newPassword: string) {
+    const email = session?.user?.email
+    if (!email) return { error: 'לא מחוברים.' }
+
+    const { error: reauthError } = await supabase.auth.signInWithPassword({
+      email,
+      password: currentPassword,
+    })
+    if (reauthError) return { error: 'הסיסמה הנוכחית שגויה.' }
+
+    return updatePassword(newPassword)
+  }
+
   return (
     <AuthContext.Provider
       value={{
@@ -136,6 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sendPasswordReset,
         verifyRecoveryLink,
         updatePassword,
+        changePassword,
       }}
     >
       {children}
