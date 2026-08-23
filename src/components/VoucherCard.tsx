@@ -154,42 +154,59 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    // No overflow-hidden on the card: it would clip the shared-with panel at
+    // the card edge. The photo rounds its own top corners instead.
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       {photoUrl && (
-        <img src={photoUrl} alt={`שובר ${voucher.store_name}`} className="h-36 w-full object-cover" />
+        <img
+          src={photoUrl}
+          alt={`שובר ${voucher.store_name}`}
+          className="h-36 w-full rounded-t-2xl object-cover"
+        />
       )}
       <div className="p-4">
-        <div className="flex items-start justify-between gap-3">
+        {/* The panel is anchored to this whole row, not to the heading: the
+            heading column is narrowed by the amount badge, and a panel pinned
+            there runs off a 360px screen. */}
+        <div className="relative flex items-start justify-between gap-3">
           <div>
-            {/* One row with the name; wraps only if there is genuinely no room. */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <h3 className="font-semibold text-slate-900">{voucher.store_name}</h3>
-
-              {isShared && (
-                <div className="relative flex items-center gap-1">
-                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                    {owner ? `משותף · ${others}` : 'שותפו איתכם'}
+            {/* The badge flows inline with the name so it sits straight after
+                the text, rather than dropping onto a line of its own when the
+                store name is long. */}
+              <h3 className="font-semibold text-slate-900">
+                {voucher.store_name}
+                {isShared && (
+                  <span className="ms-2 inline-flex items-center gap-1 align-middle">
+                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      {owner ? `משותף · ${others}` : 'שותפו איתכם'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSharedWith((v) => !v)}
+                      aria-label="עם מי השובר משותף"
+                      aria-expanded={showSharedWith}
+                      title={sharedWithSummary}
+                      className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50"
+                    >
+                      i
+                    </button>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowSharedWith((v) => !v)}
-                    aria-label="עם מי השובר משותף"
-                    aria-expanded={showSharedWith}
-                    title={sharedWithSummary}
-                    className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50"
-                  >
-                    i
-                  </button>
-    
-                  {showSharedWith && (
-                    <>
-                      {/* Tap-away layer: a hover tooltip alone is unusable on a phone. */}
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setShowSharedWith(false)}
-                        aria-hidden="true"
-                      />
-                      <div className="absolute top-7 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-start shadow-lg start-0">
+                )}
+              </h3>
+
+              {isShared && showSharedWith && (
+                <>
+                  {/* Tap-away layer: a hover tooltip alone is unusable on a phone. */}
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowSharedWith(false)}
+                    aria-hidden="true"
+                  />
+                  {/* Pinned to the left edge and opening rightwards (end-0 is
+                      the left side in RTL), so the panel always has the full
+                      card width to grow into, wherever the icon happens to sit
+                      after a long store name. */}
+                  <div className="absolute top-full z-20 mt-1 w-64 max-w-[calc(100vw-3rem)] rounded-xl border border-slate-200 bg-white p-3 text-start shadow-lg end-0">
                         <p className="text-xs font-semibold text-slate-500">השובר משותף עם</p>
                         <ul className="mt-2 space-y-1.5">
                           {people.map((p) => (
@@ -222,12 +239,9 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
                             הסרת חשבון מבטלת גם את קישורי השיתוף הקיימים לשובר זה.
                           </p>
                         )}
-                      </div>
-                    </>
-                  )}
-                </div>
+                  </div>
+                </>
               )}
-            </div>
 
             <p className="text-sm text-slate-500">
               נוסף בתאריך {dateFormatter.format(new Date(voucher.created_at))}
