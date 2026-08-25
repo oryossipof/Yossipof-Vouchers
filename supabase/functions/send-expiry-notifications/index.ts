@@ -106,7 +106,10 @@ async function sendOne(
     await appServer
       .subscribe(sub as unknown as webpush.PushSubscription)
       .pushTextMessage(JSON.stringify(payload), {
-        urgency: webpush.Urgency.Normal,
+        // High, not Normal: APNs is entitled to hold a normal-priority push
+        // for a locked, idle iPhone until it next wakes, which for a once-daily
+        // 10:00 reminder can mean it lands hours late or not that day at all.
+        urgency: webpush.Urgency.High,
         // A reminder is worthless once the day is over.
         ttl: 12 * 60 * 60,
         // Collapses an undelivered reminder still queued for a phone that has

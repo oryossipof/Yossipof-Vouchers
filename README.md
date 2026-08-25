@@ -260,6 +260,18 @@ normal tab.
 handler. On iOS the prompt is tied to the user gesture, and awaiting anything
 beforehand consumes it — the prompt is then dropped with no error at all.
 
+### A normal-urgency push can sit undelivered on a locked iPhone
+
+Apple accepted the push, marked it delivered, and nothing appeared on the
+phone. The cause was `Urgency: normal`, which entitles APNs to hold a push for
+a locked, idle device until it next wakes — for a once-daily 10:00 reminder
+that can mean hours late, or not that day at all. Raising it to `high` made the
+notification arrive immediately. Chrome showed no such behaviour, so this is
+another one that only a real iPhone finds.
+
+`high` is the right level here regardless: this is a user-visible, time-bound
+alert, not a background sync.
+
 ### Apple is stricter about the Topic header
 
 Apple rejected every push with `400 BadWebPushTopic` while Chrome accepted the
