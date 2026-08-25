@@ -28,6 +28,9 @@ interface Recipient {
 /** Beyond this the body is a wall of store names on a lock screen. */
 const MAX_LISTED = 3
 
+/** base64url of 'voucher-expiry'. See the note where it is used. */
+const TOPIC = 'dm91Y2hlci1leHBpcnk'
+
 const CORS = { 'Access-Control-Allow-Origin': '*' }
 
 function json(body: unknown, status = 200) {
@@ -106,12 +109,26 @@ async function sendOne(
         urgency: webpush.Urgency.Normal,
         // A reminder is worthless once the day is over.
         ttl: 12 * 60 * 60,
-        topic: 'voucherexpiry',
+        // Collapses an undelivered reminder still queued for a phone that has
+        // been offline, so it wakes to the latest one rather than a backlog.
+        // Apple rejects a topic that is not genuinely base64url-decodable with
+        // 400 BadWebPushTopic, even though 'voucherexpiry' is spelled entirely
+        // from the base64url alphabet -- so this is the encoded form.
+        topic: TOPIC,
       })
     return { ok: true, gone: false, status: 201 }
   } catch (err) {
     if (err instanceof webpush.PushMessageError) {
       const status = err.response.status
+      // The push service's own explanation is the only thing that makes a 400
+      // diagnosable -- Apple in particular says which header it disliked.
+      let reason = ''
+      try {
+        reason = (await err.response.text()).slice(0, 300)
+      } catch {
+        // Body already consumed or empty; the status will have to do.
+      }
+      if (reason) console.error(`push service said ${status}: ${reason}`)
       // isGone() only checks 410, but Chrome and Apple both use 404 for an
       // endpoint that no longer exists.
       return { ok: false, gone: status === 404 || status === 410, status }

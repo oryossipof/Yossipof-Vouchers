@@ -260,6 +260,20 @@ normal tab.
 handler. On iOS the prompt is tied to the user gesture, and awaiting anything
 beforehand consumes it — the prompt is then dropped with no error at all.
 
+### Apple is stricter about the Topic header
+
+Apple rejected every push with `400 BadWebPushTopic` while Chrome accepted the
+same requests without complaint. The `Topic` header was `voucherexpiry`: thirteen
+characters, every one of them from the base64url alphabet, which is what RFC 8030
+asks for. Apple wants a value that genuinely **base64url-decodes**, not merely one
+spelled from that alphabet, so the topic is now `dm91Y2hlci1leHBpcnk` — the
+encoded form of `voucher-expiry`.
+
+This only appears on a real iPhone. Every desktop test passed and FCM was happy,
+which is the reason `sendOne` logs the push service's own `reason` rather than
+just the status code: `{"reason":"BadWebPushTopic"}` turned an unexplained 400
+into a one-line fix.
+
 ### Subscriptions
 
 `push_subscriptions` is keyed on the endpoint, which is globally unique and is
