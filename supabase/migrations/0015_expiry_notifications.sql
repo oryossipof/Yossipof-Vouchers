@@ -52,13 +52,20 @@ alter table public.voucher_expiry_notices enable row level security;
  * `p_claim = false` answers the same question without taking anything: it
  * reports what *would* go out. Without it a dry run at 09:50 would consume the
  * day's reminders and the real 10:00 send would find nothing left to do.
+ *
+ * `p_user_id` narrows the whole query to one account. It has to be applied
+ * here rather than by filtering the result, or asking for one person's
+ * reminders would claim everybody else's and then not send them, stranding
+ * those until the staleness sweep.
  */
 drop function if exists public.claim_expiry_notifications(date, interval);
+drop function if exists public.claim_expiry_notifications(date, interval, boolean);
 
 create or replace function public.claim_expiry_notifications(
   p_today date default null,
   p_stale interval default interval '10 minutes',
-  p_claim boolean default true
+  p_claim boolean default true,
+  p_user_id uuid default null
 )
 returns jsonb
 language plpgsql
@@ -99,10 +106,16 @@ begin
       from due d
       join public.voucher_members m on m.voucher_id = d.voucher_id
   ),
+  -- Narrowed before anything is taken, so a single-account run leaves every
+  -- other account's reminders untouched.
+  wanted as (
+    select * from holders h
+     where p_user_id is null or h.user_id = p_user_id
+  ),
   claimed as (
     insert into public.voucher_expiry_notices (voucher_id, user_id, expires_on, milestone)
     select h.voucher_id, h.user_id, h.expires_at, h.milestone
-      from holders h
+      from wanted h
      where p_claim
     on conflict (voucher_id, user_id, expires_on, milestone) do nothing
     returning voucher_id, user_id, expires_on, milestone
@@ -111,7 +124,7 @@ begin
   -- rather than by inserting.
   previewed as (
     select h.voucher_id, h.user_id, h.expires_at as expires_on, h.milestone
-      from holders h
+      from wanted h
      where not p_claim
        and not exists (
              select 1
@@ -131,6 +144,7 @@ begin
       from public.voucher_expiry_notices n
      where n.notified_at is null
        and n.claimed_at < now() - p_stale
+       and (p_user_id is null or n.user_id = p_user_id)
   )
   select coalesce(jsonb_agg(g.entry), '[]'::jsonb)
     into v_result
@@ -200,8 +214,8 @@ $$;
 -- Neither function is for clients. `authenticated` is revoked explicitly:
 -- claim_expiry_notifications is security definer and would otherwise let any
 -- signed-in user read every other user's store names and push endpoints.
-revoke all on function public.claim_expiry_notifications(date, interval, boolean) from public, anon, authenticated;
+revoke all on function public.claim_expiry_notifications(date, interval, boolean, uuid) from public, anon, authenticated;
 revoke all on function public.mark_expiry_notifications_sent(jsonb) from public, anon, authenticated;
 
-grant execute on function public.claim_expiry_notifications(date, interval, boolean) to service_role;
+grant execute on function public.claim_expiry_notifications(date, interval, boolean, uuid) to service_role;
 grant execute on function public.mark_expiry_notifications_sent(jsonb) to service_role;

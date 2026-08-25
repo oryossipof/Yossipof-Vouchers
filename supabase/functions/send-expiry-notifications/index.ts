@@ -209,6 +209,9 @@ Deno.serve(async (req) => {
   const { data, error } = await admin.rpc('claim_expiry_notifications', {
     p_today: body.today ?? null,
     p_claim: !body.dry_run,
+    // Narrowing happens in the query, not afterwards: filtering the result
+    // would claim every other account's reminders and then not send them.
+    p_user_id: body.only_user_id ?? null,
   })
 
   if (error) {
@@ -216,8 +219,7 @@ Deno.serve(async (req) => {
     return json({ error: 'claim failed' }, 500)
   }
 
-  let recipients = (data ?? []) as Recipient[]
-  if (body.only_user_id) recipients = recipients.filter((r) => r.user_id === body.only_user_id)
+  const recipients = (data ?? []) as Recipient[]
 
   // Reports what would go out without claiming anything, so it is safe to run
   // at any time, including minutes before the real job.
