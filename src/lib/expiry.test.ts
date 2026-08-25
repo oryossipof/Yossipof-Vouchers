@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Voucher } from '../types'
 import {
+  compareByExpiry,
   daysUntilExpiry,
   expiryLabel,
   expiryTone,
@@ -12,9 +13,9 @@ import {
   todayInIsrael,
 } from './expiry'
 
-function voucher(expires_at: string | null): Voucher {
+function voucher(expires_at: string | null, created_at = '2026-01-01T00:00:00Z', id = 'v1'): Voucher {
   return {
-    id: 'v1',
+    id,
     user_id: 'u1',
     store_name: 'קסטרו',
     code: 'ABC-123',
@@ -22,10 +23,15 @@ function voucher(expires_at: string | null): Voucher {
     note: null,
     photo_path: null,
     status: 'active',
-    created_at: '2026-01-01T00:00:00Z',
+    created_at,
     used_at: null,
     expires_at,
   }
+}
+
+/** Sorts a list the way the app does and returns the ids, for readability. */
+function order(list: Voucher[], newestFirst = false): string[] {
+  return [...list].sort((a, b) => compareByExpiry(a, b, newestFirst)).map((v) => v.id)
 }
 
 describe('isIsoDate', () => {
@@ -216,5 +222,67 @@ describe('todayInIsrael', () => {
     expect(new Date('2026-11-22T22:30:00Z').toISOString().slice(0, 10)).toBe('2026-11-22')
     // An hour earlier it is still the 22nd in Israel too.
     expect(todayInIsrael(new Date('2026-11-22T21:30:00Z'))).toBe('2026-11-22')
+  })
+})
+
+describe('compareByExpiry', () => {
+  it('puts whatever lapses soonest first', () => {
+    const soon = voucher('2026-03-01', '2026-01-01T00:00:00Z', 'soon')
+    const later = voucher('2026-09-01', '2026-01-01T00:00:00Z', 'later')
+    expect(order([later, soon])).toEqual(['soon', 'later'])
+  })
+
+  it('breaks ties on the date added, oldest first', () => {
+    const older = voucher('2026-03-01', '2026-01-01T00:00:00Z', 'older')
+    const newer = voucher('2026-03-01', '2026-02-01T00:00:00Z', 'newer')
+    expect(order([newer, older])).toEqual(['older', 'newer'])
+  })
+
+  it('sends vouchers with no expiry to the back', () => {
+    // No date means it never becomes urgent, so it must not displace one that
+    // does -- even when it was added long before.
+    const undated = voucher(null, '2020-01-01T00:00:00Z', 'undated')
+    const dated = voucher('2099-12-31', '2026-01-01T00:00:00Z', 'dated')
+    expect(order([undated, dated])).toEqual(['dated', 'undated'])
+  })
+
+  it('orders the undated ones among themselves by date added', () => {
+    const first = voucher(null, '2026-01-01T00:00:00Z', 'first')
+    const second = voucher(null, '2026-06-01T00:00:00Z', 'second')
+    expect(order([second, first])).toEqual(['first', 'second'])
+  })
+
+  it('reverses only the date when asked for newest expiry first', () => {
+    const old = voucher('2024-01-01', '2026-01-01T00:00:00Z', 'old')
+    const recent = voucher('2026-08-01', '2026-01-01T00:00:00Z', 'recent')
+    expect(order([old, recent], true)).toEqual(['recent', 'old'])
+  })
+
+  it('keeps the added-date tie-break oldest-first when reversed', () => {
+    // Only the expiry comparison flips; the secondary ordering is the same
+    // wherever the list appears.
+    const older = voucher('2024-01-01', '2026-01-01T00:00:00Z', 'older')
+    const newer = voucher('2024-01-01', '2026-02-01T00:00:00Z', 'newer')
+    expect(order([newer, older], true)).toEqual(['older', 'newer'])
+  })
+
+  it('ignores an unparseable date rather than ordering by it', () => {
+    const broken = voucher('not-a-date', '2026-01-01T00:00:00Z', 'broken')
+    const dated = voucher('2026-03-01', '2026-06-01T00:00:00Z', 'dated')
+    expect(order([broken, dated])).toEqual(['dated', 'broken'])
+  })
+
+  it('is a total order — sorting is stable and repeatable', () => {
+    const list = [
+      voucher('2026-05-01', '2026-01-03T00:00:00Z', 'c'),
+      voucher(null, '2026-01-01T00:00:00Z', 'e'),
+      voucher('2026-01-01', '2026-01-02T00:00:00Z', 'a'),
+      voucher('2026-05-01', '2026-01-01T00:00:00Z', 'b'),
+      voucher(null, '2026-01-05T00:00:00Z', 'f'),
+    ]
+    expect(order(list)).toEqual(['a', 'b', 'c', 'e', 'f'])
+    expect(order(order(list).map((id) => list.find((v) => v.id === id)!))).toEqual([
+      'a', 'b', 'c', 'e', 'f',
+    ])
   })
 })

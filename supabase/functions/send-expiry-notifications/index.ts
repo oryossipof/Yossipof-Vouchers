@@ -57,7 +57,10 @@ function digest(items: Item[]): { title: string; body: string; url: string } {
     return {
       title: 'שוברים',
       body: `השובר של ${only.store_name} פג ${whenPhrase(only.milestone)}`,
-      url: `/edit/${only.voucher_id}`,
+      // The active list, not the edit screen: someone tapping a reminder wants
+      // to use the voucher, not change it -- and the list now leads with
+      // whatever lapses soonest, so it is already at the top.
+      url: '/',
     }
   }
 
@@ -68,7 +71,6 @@ function digest(items: Item[]): { title: string; body: string; url: string } {
   return {
     title: `${items.length} שוברים פגים בקרוב`,
     body: listed.join(' · '),
-    // No single voucher to open, so the active list is the useful destination.
     url: '/',
   }
 }

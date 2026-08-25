@@ -135,6 +135,29 @@ Because expiry depends on the date rather than on any event, `today` is state in
 `VouchersContext` refreshed on `visibilitychange`, on `online`, and hourly — a
 session left open overnight would otherwise keep showing yesterday's split.
 
+### Ordering
+
+`compareByExpiry` puts whatever lapses soonest at the top, breaking ties on the
+date the voucher was added, oldest first. A voucher with no expiry date never
+becomes urgent, so it sorts after every dated one however long it has been
+sitting there.
+
+The expired list reverses only the date comparison, so it leads with what lapsed
+most recently — a coupon that died two years ago is the least interesting thing
+on that screen. The added-date tie-break stays oldest-first in both, so the
+secondary ordering is the same wherever you look. Used vouchers keep the order
+they were added in, which is what the query already returns: nothing there is
+urgent.
+
+### Typing or picking a date
+
+The field takes both. The visible input is masked text so the format is
+dd/mm/yyyy on every device, and a calendar button beside it opens the platform's
+own picker via `showPicker()`, seeded with whatever has been typed or with today
+when the field is empty — otherwise the picker opens on 1970. Whatever the
+picker returns is written back through `formatDate`, so the field only ever
+holds one format.
+
 > **Adding a column to `vouchers` needs a grant.** `0004_harden_sharing.sql`
 > revoked table-level `insert`/`update` from `authenticated` and granted the
 > safe columns back one at a time, so a new column is not writable by default.

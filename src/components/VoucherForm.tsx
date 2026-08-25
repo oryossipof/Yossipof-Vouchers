@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { Voucher, VoucherFormInput } from '../types'
 import { useVouchers } from '../context/VouchersContext'
 import { formatDate, maskDateInput, parseDate, todayInIsrael } from '../lib/expiry'
@@ -33,6 +33,10 @@ export function VoucherForm({
   const [note, setNote] = useState(voucher?.note ?? '')
   // Held as the dd/mm/yyyy text the user sees; converted to ISO only on save.
   const [expiry, setExpiry] = useState(formatDate(voucher?.expires_at ?? null))
+  // Backs the calendar button: a real date input, kept out of the layout, so
+  // the platform's own picker can be opened without it dictating the format
+  // shown in the field.
+  const datePickerRef = useRef<HTMLInputElement>(null)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null)
@@ -49,6 +53,18 @@ export function VoucherForm({
   const expiryInvalid = trimmedExpiry.length === 10 && parsedExpiry === null
   // ISO dates compare correctly as plain strings, so this needs no date maths.
   const expiryAlreadyPast = parsedExpiry !== null && parsedExpiry < todayInIsrael()
+
+  function openDatePicker() {
+    const el = datePickerRef.current
+    if (!el) return
+    // Seed it with whatever is typed, or today when the field is empty, so the
+    // picker opens on the current month rather than on 1970.
+    el.value = parsedExpiry ?? todayInIsrael()
+    // showPicker is the supported way in; older browsers fall back to a click,
+    // which opens the picker on the (visually hidden but focusable) input.
+    if (typeof el.showPicker === 'function') el.showPicker()
+    else el.click()
+  }
 
   // Applying the parsed fields during render rather than from an effect is
   // React's documented way to adjust state when a prop changes: it avoids the
@@ -184,23 +200,49 @@ export function VoucherForm({
 
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">תוקף עד (אופציונלי)</label>
-        {/* A plain text field rather than <input type="date">: the native picker
-            renders in the device's locale, so some users would be shown
-            mm/dd/yyyy. Typing eight digits gives the same dd/mm/yyyy
-            everywhere, and inputMode="numeric" still raises the number pad. */}
-        <input
-          value={expiry}
-          onChange={(e) => setExpiry(maskDateInput(e.target.value))}
-          inputMode="numeric"
-          placeholder="דד/חח/שששש"
-          maxLength={10}
-          dir="ltr"
-          className={`w-full rounded-lg border px-3 py-2 text-start text-sm focus:outline-none focus:ring-1 ${
-            expiryInvalid
-              ? 'border-red-400 focus:border-red-500 focus:ring-red-500'
-              : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'
-          }`}
-        />
+        {/* Typing and picking, rather than one or the other. The visible field
+            is plain text with a mask, because a bare <input type="date"> renders
+            in the device's locale and would show some users mm/dd/yyyy — for a
+            date like 03/04 that silently means a different day. The calendar
+            button opens the platform picker for people who would rather not
+            type, and its result is written back as dd/mm/yyyy. */}
+        <div className="relative">
+          <input
+            value={expiry}
+            onChange={(e) => setExpiry(maskDateInput(e.target.value))}
+            inputMode="numeric"
+            placeholder="dd/mm/yyyy"
+            maxLength={10}
+            dir="ltr"
+            className={`w-full rounded-lg border py-2 pe-3 ps-11 text-start text-sm focus:outline-none focus:ring-1 ${
+              expiryInvalid
+                ? 'border-red-400 focus:border-red-500 focus:ring-red-500'
+                : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'
+            }`}
+          />
+          <button
+            type="button"
+            onClick={openDatePicker}
+            aria-label="בחירת תאריך מלוח שנה"
+            title="בחירה מלוח שנה"
+            className="absolute inset-y-0 start-0 flex w-10 items-center justify-center text-slate-400 hover:text-indigo-600"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
+            </svg>
+          </button>
+          {/* Visually hidden, but still focusable and clickable so the fallback
+              works where showPicker is unavailable. */}
+          <input
+            ref={datePickerRef}
+            type="date"
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(e) => setExpiry(formatDate(e.target.value))}
+            className="pointer-events-none absolute bottom-0 start-0 h-0 w-0 opacity-0"
+          />
+        </div>
         {expiryInvalid && (
           <p className="mt-1 text-sm text-red-600">תאריך זה אינו קיים. לדוגמה: 30/11/2026.</p>
         )}

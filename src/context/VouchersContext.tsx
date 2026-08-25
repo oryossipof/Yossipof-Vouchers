@@ -3,7 +3,7 @@ import { supabase, VOUCHER_PHOTOS_BUCKET } from '../lib/supabase'
 import type { VoucherFormInput, Voucher, VoucherStatus } from '../types'
 import { useAuth } from './AuthContext'
 import { duplicateMessage, findVoucherByCode as findByCode } from '../lib/vouchers'
-import { isExpired, todayInIsrael } from '../lib/expiry'
+import { compareByExpiry, isExpired, todayInIsrael } from '../lib/expiry'
 import { syncPushSubscription } from '../lib/push'
 
 export type ClaimOutcome = 'joined' | 'already_member' | 'own_voucher'
@@ -475,8 +475,18 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
   // A used voucher stays under "used" even once its date passes: it was
   // already spent, and reclassifying it as expired would lose that. Only an
   // unspent voucher can expire.
-  const active = vouchers.filter((v) => v.status === 'active' && !isExpired(v, today))
-  const expired = vouchers.filter((v) => v.status === 'active' && isExpired(v, today))
+  //
+  // Active vouchers lead with whatever lapses soonest. Expired ones lead with
+  // whatever lapsed most recently, since a coupon that died two years ago is
+  // the least interesting thing on that screen. Used vouchers keep the order
+  // they were added in -- nothing there is urgent -- which is what the query's
+  // own ordering already gives.
+  const active = vouchers
+    .filter((v) => v.status === 'active' && !isExpired(v, today))
+    .sort((a, b) => compareByExpiry(a, b))
+  const expired = vouchers
+    .filter((v) => v.status === 'active' && isExpired(v, today))
+    .sort((a, b) => compareByExpiry(a, b, true))
   const used = vouchers.filter((v) => v.status === 'used')
 
   return (

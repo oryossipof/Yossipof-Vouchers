@@ -105,3 +105,30 @@ export function expiryLabel(voucher: Voucher, today: string): string | null {
   if (days <= 7) return `פג תוקף בעוד ${days} ימים`
   return `בתוקף עד ${date}`
 }
+
+/**
+ * Orders vouchers by urgency: the ones lapsing soonest first, then by the date
+ * they were added, oldest first. A voucher with no expiry date never becomes
+ * urgent, so it sorts after every dated one rather than jumping the queue.
+ *
+ * `newestExpiryFirst` reverses only the date comparison, for the expired list —
+ * there the useful thing at the top is what lapsed most recently, not a coupon
+ * that died two years ago. The added-date tie-break stays oldest-first either
+ * way, so the secondary ordering is the same wherever you look.
+ */
+export function compareByExpiry(a: Voucher, b: Voucher, newestExpiryFirst = false): number {
+  const ax = a.expires_at && isIsoDate(a.expires_at) ? a.expires_at : null
+  const bx = b.expires_at && isIsoDate(b.expires_at) ? b.expires_at : null
+
+  if (ax && bx && ax !== bx) {
+    // ISO dates compare correctly as plain strings.
+    const earlierFirst = ax < bx ? -1 : 1
+    return newestExpiryFirst ? -earlierFirst : earlierFirst
+  }
+  if (ax && !bx) return -1
+  if (!ax && bx) return 1
+
+  if (a.created_at < b.created_at) return -1
+  if (a.created_at > b.created_at) return 1
+  return 0
+}
