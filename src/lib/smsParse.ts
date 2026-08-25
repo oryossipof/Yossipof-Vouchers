@@ -15,7 +15,12 @@ export interface ParsedVoucher {
 
 /** Longer than any real store name or code; guards against a runaway response. */
 const MAX_SHORT = 120
-const MAX_NOTE = 500
+
+/**
+ * The note holds the original message, which is the user's own text rather than
+ * the model's, so this only needs to be past the length of any real SMS.
+ */
+const MAX_NOTE = 2000
 
 /** A coupon dated further out than this is a parsing error, not a long promotion. */
 const MAX_YEARS_AHEAD = 10

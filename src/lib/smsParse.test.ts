@@ -127,7 +127,9 @@ describe('normalizeParsedVoucher', () => {
     it('caps a runaway response', () => {
       const long = 'א'.repeat(5000)
       expect(normalizeParsedVoucher({ store_name: long }, TODAY).store_name).toHaveLength(120)
-      expect(normalizeParsedVoucher({ note: long }, TODAY).note).toHaveLength(500)
+      // The note carries the whole original message, so its ceiling sits past
+      // the length of any real SMS rather than down at a single field's worth.
+      expect(normalizeParsedVoucher({ note: long }, TODAY).note).toHaveLength(2000)
     })
 
     it('ignores non-strings', () => {

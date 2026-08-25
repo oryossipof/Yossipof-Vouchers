@@ -57,9 +57,19 @@ export function VoucherForm({
   function openDatePicker() {
     const el = datePickerRef.current
     if (!el) return
+
     // Seed it with whatever is typed, or today when the field is empty, so the
     // picker opens on the current month rather than on 1970.
-    el.value = parsedExpiry ?? todayInIsrael()
+    const seed = parsedExpiry ?? todayInIsrael()
+    el.value = seed
+
+    // Write the seed into the field straight away. Confirming a date picker
+    // without moving off the date it opened on changes nothing, so no change
+    // event fires -- tapping "set" immediately would otherwise leave the field
+    // empty and look broken. This way the field always shows what the picker
+    // is showing, and choosing a different date updates it through onChange.
+    setExpiry(formatDate(seed))
+
     // showPicker is the supported way in; older browsers fall back to a click,
     // which opens the picker on the (visually hidden but focusable) input.
     if (typeof el.showPicker === 'function') el.showPicker()

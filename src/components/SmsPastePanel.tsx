@@ -19,7 +19,7 @@ function filledSummary(v: ParsedVoucher): string {
   if (v.code) names.push('הקוד')
   if (v.amount !== null) names.push('הסכום')
   if (v.expires_at) names.push('התוקף')
-  if (v.note) names.push('ההערה')
+  if (v.note) names.push('ההודעה המלאה בהערה')
   return names.join(', ')
 }
 
@@ -76,14 +76,20 @@ export function SmsPastePanel({ onParsed }: SmsPastePanelProps) {
       return
     }
 
+    // The note is the message itself, kept verbatim from what was pasted
+    // rather than from anything the model returned: it is the record of what
+    // the store actually sent, so the conditions nobody thought to extract are
+    // still there to read later.
+    const withMessage = { ...parsed, note: text.trim() }
+
     onParsed({
-      ...(parsed.store_name ? { store_name: parsed.store_name } : {}),
-      ...(parsed.code ? { code: parsed.code } : {}),
-      ...(parsed.amount !== null ? { amount: parsed.amount } : {}),
-      ...(parsed.expires_at ? { expires_at: parsed.expires_at } : {}),
-      ...(parsed.note ? { note: parsed.note } : {}),
+      ...(withMessage.store_name ? { store_name: withMessage.store_name } : {}),
+      ...(withMessage.code ? { code: withMessage.code } : {}),
+      ...(withMessage.amount !== null ? { amount: withMessage.amount } : {}),
+      ...(withMessage.expires_at ? { expires_at: withMessage.expires_at } : {}),
+      note: withMessage.note,
     })
-    setFilled(filledSummary(parsed))
+    setFilled(filledSummary(withMessage))
   }
 
   if (!open) {

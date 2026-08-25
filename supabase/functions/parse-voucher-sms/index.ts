@@ -24,17 +24,31 @@ The messages are usually Hebrew, from Israeli retailers, and often contain
 marketing filler around the useful parts.
 
 Rules:
-- Amounts are in shekels (₪ / ש"ח / NIS). Return a plain number, no currency symbol.
+- amount is what the voucher is WORTH — credit the holder can spend down. A
+  price the holder still has to pay is not an amount: "2 חלות ב 15₪" is a
+  price, so amount is null and the 15₪ belongs in store_name. Shekels
+  (₪ / ש"ח / NIS), returned as a plain number with no currency symbol.
 - Dates are written day-first. "30.11.26", "30/11/2026" and "30 בנובמבר 2026"
   all mean 30 November 2026. Always return expires_at as YYYY-MM-DD.
 - Phrases like "בתוקף עד", "תוקף", "יש לממש עד" introduce the expiry date.
-- store_name is the retailer or chain, not the sender's marketing name.
+- store_name is the retailer or chain. When the message says what the coupon is
+  actually FOR — a specific product, quantity or benefit — append it after a
+  dash, so the name alone says what you are holding:
+    "גולדה - כדור גלידה אחד"
+    "מאפה נאמן - 2 חלות"
+    "קסטרו - 20% הנחה"
+  Keep the part after the dash to the product or benefit itself. It is a label,
+  not a sentence: no conditions, no dates, no marketing.
+  When the message gives a price for that product, keep it in the label:
+    "מאפה נאמן - 2 חלות ב 15₪"
+  When the coupon is just money to spend, leave the chain name on its own.
 - code is the voucher / gift card / coupon code the customer redeems.
-- note should capture genuine restrictions ("לא כולל מבצעים", "לא כולל פריטי סייל",
-  "בסניפים נבחרים"). Leave out greetings, marketing copy, and links.
 - Return null for anything the message does not actually state. Never guess, and
-  never invent a date or an amount that is not there.`
+  never invent a date, an amount or a product that is not there.`
 
+// No `note` here on purpose: the note is the original message, which the
+// client already holds verbatim. Asking the model to echo it back would cost
+// tokens and risk it paraphrasing or truncating the thing being quoted.
 const RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -42,9 +56,8 @@ const RESPONSE_SCHEMA = {
     code: { type: 'STRING', nullable: true },
     amount: { type: 'NUMBER', nullable: true },
     expires_at: { type: 'STRING', nullable: true, description: 'YYYY-MM-DD' },
-    note: { type: 'STRING', nullable: true },
   },
-  required: ['store_name', 'code', 'amount', 'expires_at', 'note'],
+  required: ['store_name', 'code', 'amount', 'expires_at'],
 }
 
 const CORS = {

@@ -158,6 +158,13 @@ when the field is empty — otherwise the picker opens on 1970. Whatever the
 picker returns is written back through `formatDate`, so the field only ever
 holds one format.
 
+Opening the picker also writes the seed straight into the field. That looks
+redundant and is not: confirming a date picker without moving off the date it
+opened on changes nothing, so no `change` event fires and React never hears
+about it. Without this, opening the picker on an empty field and tapping *set*
+immediately left the field empty and looked broken, while picking any other date
+worked — which made it seem intermittent.
+
 > **Adding a column to `vouchers` needs a grant.** `0004_harden_sharing.sql`
 > revoked table-level `insert`/`update` from `authenticated` and granted the
 > safe columns back one at a time, so a new column is not writable by default.
@@ -192,6 +199,24 @@ check would otherwise fail the save with a database error instead of an empty
 field), rejects dates that do not exist and dates more than ten years out
 (usually a mis-read two-digit year, and accepting one would silently park the
 voucher where no reminder ever fires), and caps runaway strings.
+
+### What goes where
+
+The store name carries the product, so the list says what you are holding rather
+than only where you can spend it: `גולדה - כדור גלידה אחד`,
+`מאפה נאמן - 2 חלות במחיר 15₪`. A voucher that is simply money keeps the chain
+name on its own.
+
+`amount` is what the voucher is **worth** — credit to spend down — and a price
+the holder still has to pay is not that. `2 חלות ב 15₪` leaves `amount` null and
+puts the 15₪ in the name, because filling it in would render a `₪15.00` badge on
+the card that reads as credit the voucher does not carry. A free item leaves it
+null for the same reason.
+
+The note is the **original message, verbatim**, taken from what was pasted rather
+than from the model. That keeps it exact, costs nothing, and means the small
+print nobody thought to extract is still there to read months later. The model is
+not asked for a note at all.
 
 The result is always a **draft**: it fills the form and the user confirms it.
 Nothing is saved automatically, so a wrong amount or a hallucinated date is
