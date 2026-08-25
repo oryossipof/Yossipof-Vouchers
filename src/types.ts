@@ -12,6 +12,8 @@ export interface Voucher {
   status: VoucherStatus
   created_at: string
   used_at: string | null
+  /** Last day the voucher is valid, as `YYYY-MM-DD`. Null means it never expires. */
+  expires_at: string | null
 }
 
 export interface VoucherFormInput {
@@ -19,6 +21,8 @@ export interface VoucherFormInput {
   code: string
   amount: number | null
   note: string | null
+  /** `YYYY-MM-DD`, or null. The form takes it as dd/mm/yyyy and converts. */
+  expires_at: string | null
   photoFile: File | null
   removePhoto: boolean
 }

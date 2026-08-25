@@ -1,18 +1,23 @@
 # Vouchers
 
-A PWA for keeping track of gift cards, coupons, and other vouchers: store a code, store name, and credit amount, optionally attach a photo and a note, share a voucher with someone else, and mark vouchers as used or delete them once redeemed.
+A PWA for keeping track of gift cards, coupons, and other vouchers: store a code, store name, credit amount, and expiry date, optionally attach a photo and a note, share a voucher with someone else, and mark vouchers as used or delete them once redeemed. Paste the SMS a store sent you and the fields fill themselves in; vouchers that lapse move to their own section, and a push notification arrives before they do.
 
 ## Stack
 
-- React + TypeScript + Vite, built as an installable PWA (`vite-plugin-pwa`)
+- React + TypeScript + Vite, built as an installable PWA (`vite-plugin-pwa`, `injectManifest`)
 - Tailwind CSS
-- Supabase (Postgres, Auth, Storage) for data, authentication, and photo uploads
+- Supabase (Postgres, Auth, Storage, Edge Functions, Cron) for data, authentication, photo uploads, SMS parsing, and expiry reminders
+- Google Gemini for reading a pasted coupon SMS; Web Push (VAPID) for the reminders
 - Deployed on Netlify
 
 ## Features
 
 - Email/password sign up and login (Supabase Auth), with resend-confirmation and password reset
-- Add a voucher with store name, code, amount, an optional note, and an optional photo
+- Add a voucher with store name, code, amount, an optional expiry date, an optional note, and an optional photo
+- **Paste the store's SMS** and have the store name, code, amount, expiry date and conditions filled in automatically
+- **Expiry dates** written and shown as dd/mm/yyyy, with a countdown badge on the card once a voucher is within a week of lapsing
+- **A separate section for expired vouchers**, so the active list only shows what can still be used
+- **Push reminders at 10:00** a week before a voucher expires, the day before, and on the day itself — even with the app closed
 - Duplicate-code check: entering a code you already hold shows which voucher it belongs to and blocks the save
 - Edit any voucher (pencil icon on the card), including replacing or removing its photo
 - View active vouchers, reveal/hide the code, mark as used, or delete
@@ -104,9 +109,234 @@ Auth is configured with a minimum password length of 8 (matched by the signup fo
 
 Supabase's security advisor reports four `SECURITY DEFINER` functions callable by `authenticated`. That is intended: controlled privilege elevation is what makes cross-account sync possible, each function verifies `auth.uid()` ownership before doing anything, and all of them pin `search_path`. The `rls_enabled_no_policy` notice on `voucher_shares` is likewise deliberate deny-all.
 
+## Expiry dates
+
+`vouchers.expires_at` is a Postgres `date`, not a `timestamptz`. A coupon
+expires on a calendar day rather than at an instant, and a timestamp would make
+"expires today" depend on the server's offset from Israel and answer wrongly
+either side of midnight.
+
+Storage and display are separate concerns. The value crosses the wire as ISO
+`YYYY-MM-DD`; the UI reads and writes dd/mm/yyyy everywhere. The form field is a
+plain text input with an eight-digit mask rather than `<input type="date">`,
+because the native picker renders in the *device's* locale — some users would
+have been shown mm/dd/yyyy, which for a date like 03/04 silently means a
+different day. `src/lib/expiry.ts` holds `parseDate`, `formatDate` and
+`maskDateInput`, all unit-tested.
+
+A voucher is expired only once its last valid day has **passed**: on the expiry
+day itself it is still usable and still counts as active. Expired vouchers leave
+the active list and appear under `פג תוקף`, keeping their edit, share, delete and
+"mark as used" controls — a store may honour a coupon past its date, and that
+should still be recordable. A **used** voucher stays under `נוצלו` even once its
+date passes; it was already spent, and reclassifying it would lose that.
+
+Because expiry depends on the date rather than on any event, `today` is state in
+`VouchersContext` refreshed on `visibilitychange`, on `online`, and hourly — a
+session left open overnight would otherwise keep showing yesterday's split.
+
+> **Adding a column to `vouchers` needs a grant.** `0004_harden_sharing.sql`
+> revoked table-level `insert`/`update` from `authenticated` and granted the
+> safe columns back one at a time, so a new column is not writable by default.
+> `0013` therefore grants `insert (expires_at)` and `update (expires_at)`
+> explicitly. Without them every add and edit fails with
+> `permission denied for column expires_at` — and since every RLS policy still
+> passes, it reads as an RLS bug rather than a grant bug.
+
+## Importing a voucher from an SMS
+
+Coupons arrive as text messages, and retyping one into five fields is the main
+friction in adding a voucher — it is also where the expiry date used to get
+lost, as free text in the note. The add screen therefore takes the pasted
+message and fills the form in.
+
+`supabase/functions/parse-voucher-sms` sends the text to Google Gemini
+(`gemini-3.6-flash`) with a `responseSchema`, so the reply is typed JSON rather
+than prose. The prompt is tuned for Hebrew Israeli retail: shekel amounts,
+day-first dates (`5.3.27` is 5 March 2027, not 3 May), the phrasings that
+introduce an expiry date, real restrictions into the note and marketing copy
+left out, and `null` rather than a guess for anything the message does not say.
+
+It runs server-side purely so the API key never reaches the bundle, and
+`verify_jwt` stays **on**: without it the URL is an open proxy to a metered API
+for anyone who finds it. Upstream errors are logged but never returned to the
+client, so the endpoint cannot be used to probe the project's configuration.
+
+**The model's output is untrusted input.** `normalizeParsedVoucher` in
+`src/lib/smsParse.ts` coerces and validates before anything reaches the form: it
+strips currency symbols, rejects zero and negative amounts (the column's `> 0`
+check would otherwise fail the save with a database error instead of an empty
+field), rejects dates that do not exist and dates more than ten years out
+(usually a mis-read two-digit year, and accepting one would silently park the
+voucher where no reminder ever fires), and caps runaway strings.
+
+The result is always a **draft**: it fills the form and the user confirms it.
+Nothing is saved automatically, so a wrong amount or a hallucinated date is
+catchable. The duplicate-code check still applies, so a pasted coupon you
+already hold is flagged the same as a typed one.
+
+The panel says in small print that the text is sent to an external service,
+because it is.
+
+## Expiry reminders
+
+Every day at 10:00 Israel time, everyone holding a voucher that expires in
+7 days, 1 day, or today gets a Web Push notification — the owner, any linked
+account, and anyone the voucher was shared with. A voucher only one of them
+hears about is a voucher the other two watch expire, and whoever is nearest the
+store should be the one who can act.
+
+### One notification, not three
+
+Each person gets a single digest per run rather than one notification per
+voucher: three separate alerts at 10am reads as spam, and iOS collapses
+same-tag notifications anyway. One item reads `השובר של קסטרו פג היום` and opens
+that voucher; several read `5 שוברים פגים בקרוב` with the three most urgent
+listed and `ועוד 2` for the rest. The claim table stays per-voucher, so the
+bookkeeping is still exact.
+
+### Never twice
+
+`voucher_expiry_notices` has the primary key
+`(voucher_id, user_id, expires_on, milestone)`, and the claim is a single
+`insert ... on conflict do nothing ... returning` that selects the recipients
+and takes them in the same statement. If two invocations run at once, both
+attempt the insert and only one gets the rows back — no advisory locks, no
+check-then-act race.
+
+Including `expires_on` in the key is what lets an edit re-arm the reminders:
+moving a voucher's date is a genuinely new reminder, while a repeated run
+against the same date is not. Rows stay unmarked until the push has actually
+been handed to the push service, so a send that dies halfway is retried by the
+sweep twenty minutes later.
+
+`p_claim = false` answers the same question without taking anything. Without it
+a preview at 09:50 would consume the day's reminders and the real 10:00 job
+would find nothing left to do.
+
+### Daylight saving
+
+`pg_cron` has no per-job timezone and evaluates schedules in UTC on Supabase.
+10:00 in Israel is 08:00 UTC in winter and 07:00 UTC in summer. Rather than
+editing the schedule twice a year — and getting it wrong the year nobody
+remembers — the job fires at **both** hours and does nothing unless the Israeli
+clock actually reads 10. Exactly one of the two runs does the work, every day,
+in both halves of the year.
+
+### The service worker
+
+Adding a `push` handler meant moving `vite-plugin-pwa` from `generateSW` to
+`injectManifest` with a real source file at `src/sw.ts`. Three things
+`generateSW` used to inject silently are now this file's job, and dropping any
+of them breaks the app for existing installs:
+
+1. `skipWaiting()` + `clientsClaim()`, without which `registerType: 'autoUpdate'`
+   leaves a new version waiting until every tab is closed.
+2. A `NavigationRoute` fallback to `index.html`. Without it, opening the app
+   offline or hard-refreshing a deep link like `/edit/:id` returns a 404 from
+   the cache instead of the app shell.
+3. The `voucher-photos` `CacheFirst` rule — `runtimeCaching` has no equivalent
+   under `injectManifest` and had to be re-expressed as code.
+
+`WebWorker` and `DOM` cannot share a `lib` set (both declare `self`, `fetch` and
+`Client`), so the worker is a separate TypeScript project: `tsconfig.worker.json`
+compiles `src/sw.ts`, and `tsconfig.app.json` excludes it.
+
+`notificationclick` focuses an existing window and `postMessage`s the route to
+it rather than calling `client.navigate()`, which is unreliable inside an iOS
+standalone web app.
+
+### On iPhone, the app must be installed
+
+Apple ships Web Push only to web apps added to the Home Screen (iOS 16.4+). In
+an ordinary Safari tab `window.PushManager` is simply `undefined`, and there is
+no flag or workaround short of a native app. The settings panel detects this and
+shows the Add-to-Home-Screen steps instead of a button that would silently do
+nothing; it also distinguishes iOS older than 16.4, and a permission the user
+has already refused. Android Chrome has no such restriction and works in a
+normal tab.
+
+`Notification.requestPermission()` is the **first** statement in the click
+handler. On iOS the prompt is tied to the user gesture, and awaiting anything
+beforehand consumes it — the prompt is then dropped with no error at all.
+
+### Subscriptions
+
+`push_subscriptions` is keyed on the endpoint, which is globally unique and is
+what the push service treats as the identity of a browser on a device; several
+devices per account fall out for free. There are no write policies — the two
+`security definer` functions are the only way in, because the upsert has to be
+able to *take over* a row that currently belongs to another user, which a
+row-level policy cannot express. That case is real: two people signing in on the
+same phone produce the same endpoint, and the reminders should follow whoever
+signed in last.
+
+Safari never fires `pushsubscriptionchange`, and on Chrome it can fire with no
+page open to act on it, so re-registering on app start is what actually keeps
+endpoints current. A 404 or 410 from the push service means the subscription is
+dead and the row is deleted — `isGone()` in the push library only checks 410,
+but Chrome and Apple both use 404.
+
+### Secrets
+
+The cron caller reads `project_url`, `edge_secret_key` and `cron_secret` from
+**Supabase Vault**; `0016` only reads them, so nothing secret is committed.
+Create them once by hand:
+
+```sql
+select vault.create_secret('https://<ref>.supabase.co', 'project_url');
+select vault.create_secret('<project secret key>',      'edge_secret_key');
+select vault.create_secret('<32 random bytes, base64>', 'cron_secret');
+```
+
+Do **not** use `alter database ... set app.settings.x` for these — any role can
+read that back via `current_setting()`.
+
+The functions themselves need these secrets set under Edge Functions → Secrets:
+
+| Secret | Used by |
+|---|---|
+| `GEMINI_API_KEY` | `parse-voucher-sms` |
+| `VAPID_KEYS_JSON` | `send-expiry-notifications` (the JWK pair) |
+| `VAPID_SUBJECT` | `send-expiry-notifications` (`mailto:` contact, per RFC 8292) |
+| `CRON_SECRET` | `send-expiry-notifications`, matching the Vault value |
+
+`send-expiry-notifications` runs with **`verify_jwt = false`**, because the
+caller is Postgres holding a secret key rather than a signed-in user. The
+`x-cron-secret` check inside the handler is therefore the only thing between
+that URL and the open internet — it is not optional. It replies `202` and sends
+in `EdgeRuntime.waitUntil`, because `pg_net`'s default timeout is 2 seconds.
+
+Rotating the VAPID keys invalidates **every existing subscription**, so treat
+them as permanent. The public application server key is public by definition and
+ships in the bundle as `VITE_VAPID_PUBLIC_KEY`.
+
+### Checking on it
+
+```sql
+-- did the schedule fire?
+select jobid, runid, status, return_message, start_time
+  from cron.job_run_details order by start_time desc limit 10;
+
+-- did the HTTP call land? (pg_net keeps responses for 6 hours)
+select status_code, timed_out, error_msg, content
+  from net._http_response order by created desc limit 5;
+
+-- what is still waiting to be delivered?
+select * from public.voucher_expiry_notices where notified_at is null;
+```
+
+The function takes `{"today": "YYYY-MM-DD"}` to hit any milestone without
+editing real vouchers, `{"dry_run": true}` to see what would go out without
+claiming it, and `{"only_user_id": "..."}` to restrict it to one account.
+
+> **Free plan caveat:** Supabase pauses a free project after 7 days of
+> inactivity, and a paused project runs no cron. If the app goes unused for a
+> week the 10:00 job simply stops until someone opens it again.
+
 ## Local development
 
-1. Copy `.env.example` to `.env.local` and fill in your Supabase project URL and publishable/anon key.
+1. Copy `.env.example` to `.env.local` and fill in your Supabase project URL, publishable/anon key, and VAPID public key.
 2. Install dependencies and run the dev server:
 
    ```
@@ -125,6 +355,13 @@ Run the SQL in `supabase/migrations/` against your Supabase project, in order, v
 - `0010_share_all_vouchers.sql` — adds `voucher_shares.bundle_token` and the `create_voucher_share_bundle` / `claim_voucher_share_bundle` functions behind "share all"
 - `0011_account_links.sql` — adds `account_links` / `account_link_invites`, `can_manage_voucher`, and the invite, accept, and unlink functions behind linked accounts
 - `0012_fix_insert_returning.sql` — rewrites the voucher SELECT policy so `INSERT ... RETURNING` works; see below
+- `0013_voucher_expiry.sql` — adds `vouchers.expires_at`, its partial index, and the column grants that make it writable
+- `0014_push_subscriptions.sql` — adds `push_subscriptions` and the `save_push_subscription` / `delete_push_subscription` functions
+- `0015_expiry_notifications.sql` — adds `voucher_expiry_notices` and the `claim_expiry_notifications` / `mark_expiry_notifications_sent` functions
+- `0016_expiry_cron.sql` — enables `pg_cron` and `pg_net` and schedules the daily 10:00 reminder job and its retry sweep
+
+Edge functions live in `supabase/functions/` and are deployed separately;
+`supabase/config.toml` records each one's `verify_jwt` setting.
 
 ## Live updates
 
@@ -161,13 +398,32 @@ Redirect targets must appear in the project's allowed redirect URLs. The list cu
 
 ## Tests
 
-Unit tests cover the duplicate-code rules in `src/lib/vouchers.ts` (case- and
-whitespace-insensitive matching, excluding the voucher being edited, matching
-used vouchers as well as active ones):
+Unit tests (73 of them) cover the pure logic in `src/lib/`:
+
+- `vouchers.ts` — the duplicate-code rules: case- and whitespace-insensitive
+  matching, excluding the voucher being edited, matching used vouchers as well
+  as active ones
+- `share.ts` — building the WhatsApp messages and translating Postgres errors
+- `expiry.ts` — dd/mm/yyyy parsing and masking, impossible dates like 31/02,
+  day-boundary arithmetic, the 7/1/0 labels, and the Israeli civil day. The
+  day maths is done in UTC deliberately: subtracting local times across Israel's
+  DST changeover yields 0.958 days and rounds to the wrong milestone.
+- `smsParse.ts` — normalising what the model returns, which is untrusted input:
+  currency symbols, zero and negative amounts, non-existent dates, dates far in
+  the future, and runaway strings
 
 ```
 npm test
 ```
+
+`supabase/tests/expiry_notifications_test.sql` covers the reminders (18 checks).
+It builds an owner, a linked account, a share member and an unrelated stranger,
+then asserts that all three holders are notified and the stranger is not, that
+no-date, used and already-expired vouchers are never due, that a second run
+claims nothing, that a stale undelivered claim is retried while a delivered one
+is not, that editing an expiry date re-arms the reminder, that a preview claims
+nothing, and that a device shared by two accounts follows whoever signed in
+last.
 
 `supabase/tests/sharing_test.sql` is an integration test for the sharing model.
 It creates three throwaway auth users, then asserts that a share can be created
@@ -185,6 +441,11 @@ you would rather not touch production auth at all.
 
 ## Deployment
 
-The app builds as a static site (`npm run build` → `dist/`) and is configured for Netlify via `netlify.toml` (SPA redirect included). Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as environment variables on the Netlify site.
+The app builds as a static site (`npm run build` → `dist/`) and is configured for Netlify via `netlify.toml` (SPA redirect included). Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_VAPID_PUBLIC_KEY` as environment variables on the Netlify site.
+
+The edge functions and their secrets live on Supabase rather than Netlify — see
+[Secrets](#secrets) under expiry reminders. `netlify.toml` already sends
+`Cache-Control: no-cache` for `/sw.js`, which the `injectManifest` build still
+emits under that name.
 
 Share links use `window.location.origin`, so they point at whatever host the app is served from.

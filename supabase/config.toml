@@ -1,0 +1,13 @@
+# Kept in git so the per-function settings are recorded, even though functions
+# are currently deployed through the Management API rather than the CLI.
+project_id = "ayupxtjsttkfpthlvtpx"
+
+[functions.parse-voucher-sms]
+# Signed-in callers only: without this the endpoint is an open proxy to a
+# metered model API for anyone who finds the URL.
+verify_jwt = true
+
+[functions.send-expiry-notifications]
+# Called by pg_cron holding a secret key, not by a signed-in user, so the
+# platform's JWT check cannot apply. The function checks x-cron-secret itself.
+verify_jwt = false

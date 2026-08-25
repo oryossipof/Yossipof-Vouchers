@@ -1,8 +1,13 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect } from 'react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useVouchers } from '../context/VouchersContext'
+import { isSwMessage } from '../lib/swMessages'
+import { supabase } from '../lib/supabase'
 
 const navItems = [
   { to: '/', label: 'פעילים', icon: '🎟️' },
+  { to: '/expired', label: 'פג תוקף', icon: '⏰' },
   { to: '/used', label: 'נוצלו', icon: '📦' },
   { to: '/add', label: 'הוספה', icon: '➕' },
   { to: '/account', label: 'חשבון', icon: '⚙️' },
@@ -10,6 +15,43 @@ const navItems = [
 
 export function Layout() {
   const { signOut, user } = useAuth()
+  const { refresh } = useVouchers()
+  const navigate = useNavigate()
+
+  // The service worker's half of the conversation. It has no router and no
+  // Supabase session, so tapping a notification and rotating a push endpoint
+  // both end up here.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+
+    function onMessage(event: MessageEvent) {
+      if (!isSwMessage(event.data)) return
+
+      if (event.data.type === 'NAVIGATE') {
+        navigate(event.data.url)
+      } else if (event.data.type === 'EXPIRY_REMINDER') {
+        // The reminder means something crossed a milestone; the open list is
+        // now stale. Silent, so it does not flash over what is being read.
+        void refresh(true)
+      } else if (event.data.type === 'PUSH_RESUBSCRIBED') {
+        const { subscription, oldEndpoint } = event.data
+        void (async () => {
+          if (oldEndpoint) {
+            await supabase.rpc('delete_push_subscription', { p_endpoint: oldEndpoint })
+          }
+          await supabase.rpc('save_push_subscription', {
+            p_endpoint: subscription.endpoint,
+            p_p256dh: subscription.keys?.p256dh ?? '',
+            p_auth: subscription.keys?.auth ?? '',
+            p_user_agent: navigator.userAgent,
+          })
+        })()
+      }
+    }
+
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [navigate, refresh])
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-100">
@@ -43,12 +85,15 @@ export function Layout() {
               to={item.to}
               end={item.to === '/'}
               className={({ isActive }) =>
-                `flex flex-1 flex-col items-center gap-1 py-2.5 text-xs font-medium transition-colors ${
+                // Five tabs have to fit a 360px screen, so the label is a
+                // notch smaller than the four-tab version was and is kept on
+                // one line rather than wrapping mid-word.
+                `flex flex-1 flex-col items-center gap-0.5 px-1 py-2.5 text-[11px] font-medium whitespace-nowrap transition-colors ${
                   isActive ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'
                 }`
               }
             >
-              <span className="text-lg">{item.icon}</span>
+              <span className="text-base leading-none">{item.icon}</span>
               {item.label}
             </NavLink>
           ))}

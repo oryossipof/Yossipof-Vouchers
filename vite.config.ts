@@ -12,6 +12,12 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      // injectManifest rather than generateSW: the expiry reminders need a
+      // `push` handler, and that requires a service worker source file of our
+      // own. src/sw.ts restates everything generateSW used to inject.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-512-maskable.png'],
       manifest: {
@@ -30,18 +36,11 @@ export default defineConfig({
           { src: '/icons/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: {
+      // Under injectManifest the `workbox` key is ignored entirely; only this
+      // one is read, and it cannot express runtime caching. The voucher-photos
+      // rule that used to live here is now code in src/sw.ts.
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith('/storage/v1/object'),
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'voucher-photos',
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
-            },
-          },
-        ],
       },
     }),
   ],

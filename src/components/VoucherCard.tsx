@@ -5,9 +5,18 @@ import { useVouchers, type ShareParticipant } from '../context/VouchersContext'
 import { useAuth } from '../context/AuthContext'
 import { ConfirmDialog } from './ConfirmDialog'
 import { ShareDialog } from './ShareDialog'
+import { expiryLabel, expiryTone, formatDate } from '../lib/expiry'
 
 const currency = new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS' })
 const dateFormatter = new Intl.DateTimeFormat('he-IL')
+
+// How loudly the card announces the expiry, from a passing mention to a
+// warning that the voucher is already dead.
+const expiryStyles = {
+  expired: 'bg-red-50 text-red-700',
+  soon: 'bg-amber-50 text-amber-800',
+  later: 'bg-slate-100 text-slate-600',
+} as const
 
 type PendingAction = 'used' | 'active' | 'delete' | null
 
@@ -56,6 +65,7 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
     memberCount,
     shareParticipants,
     removeMember,
+    today,
   } = useVouchers()
   const navigate = useNavigate()
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
@@ -87,6 +97,9 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
   // Handing out links and deleting for everyone are the owner's powers, held
   // by a linked account too.
   const canShare = manage
+
+  const expiry = expiryLabel(voucher, today)
+  const tone = expiryTone(voucher, today)
 
   useEffect(() => {
     let cancelled = false
@@ -266,6 +279,15 @@ export function VoucherCard({ voucher }: { voucher: Voucher }) {
               נוסף בתאריך {dateFormatter.format(new Date(voucher.created_at))}
               {voucher.used_at && ` · נוצל בתאריך ${dateFormatter.format(new Date(voucher.used_at))}`}
             </p>
+
+            {expiry && tone && (
+              <span
+                title={`תוקף עד ${formatDate(voucher.expires_at)}`}
+                className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${expiryStyles[tone]}`}
+              >
+                {expiry}
+              </span>
+            )}
           </div>
           {voucher.amount !== null && (
             <span className="whitespace-nowrap rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">

@@ -1,22 +1,38 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Voucher, VoucherFormInput } from '../types'
 import { useVouchers } from '../context/VouchersContext'
+import { formatDate, maskDateInput, parseDate, todayInIsrael } from '../lib/expiry'
 
 interface VoucherFormProps {
   voucher?: Voucher
+  /**
+   * Fields to drop into the form after it has mounted -- what the SMS parser
+   * found. Only the keys present are applied, so a partial parse leaves
+   * anything the user has already typed alone.
+   */
+  prefill?: Partial<VoucherFormInput> | null
   submitLabel: string
   savingLabel: string
   onSubmit: (input: VoucherFormInput) => Promise<{ error: string | null }>
   onCancel?: () => void
 }
 
-export function VoucherForm({ voucher, submitLabel, savingLabel, onSubmit, onCancel }: VoucherFormProps) {
+export function VoucherForm({
+  voucher,
+  prefill,
+  submitLabel,
+  savingLabel,
+  onSubmit,
+  onCancel,
+}: VoucherFormProps) {
   const { findVoucherByCode, getPhotoUrl } = useVouchers()
 
   const [storeName, setStoreName] = useState(voucher?.store_name ?? '')
   const [code, setCode] = useState(voucher?.code ?? '')
   const [amount, setAmount] = useState(voucher?.amount != null ? String(voucher.amount) : '')
   const [note, setNote] = useState(voucher?.note ?? '')
+  // Held as the dd/mm/yyyy text the user sees; converted to ISO only on save.
+  const [expiry, setExpiry] = useState(formatDate(voucher?.expires_at ?? null))
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null)
@@ -25,6 +41,30 @@ export function VoucherForm({ voucher, submitLabel, savingLabel, onSubmit, onCan
   const [saving, setSaving] = useState(false)
 
   const duplicate = findVoucherByCode(code, voucher?.id)
+
+  const trimmedExpiry = expiry.trim()
+  const parsedExpiry = parseDate(trimmedExpiry)
+  // Only complain once the field is full: eight digits typed and still no
+  // valid date means something like 31/02/2026, not a half-finished entry.
+  const expiryInvalid = trimmedExpiry.length === 10 && parsedExpiry === null
+  // ISO dates compare correctly as plain strings, so this needs no date maths.
+  const expiryAlreadyPast = parsedExpiry !== null && parsedExpiry < todayInIsrael()
+
+  // Applying the parsed fields during render rather than from an effect is
+  // React's documented way to adjust state when a prop changes: it avoids the
+  // extra commit an effect would cause, so the form never paints empty for a
+  // frame after a successful parse.
+  const [appliedPrefill, setAppliedPrefill] = useState(prefill)
+  if (prefill !== appliedPrefill) {
+    setAppliedPrefill(prefill)
+    // Only the fields the parser actually found, so a partial parse leaves
+    // anything already typed alone.
+    if (prefill?.store_name != null) setStoreName(prefill.store_name)
+    if (prefill?.code != null) setCode(prefill.code)
+    if (prefill?.amount != null) setAmount(String(prefill.amount))
+    if (prefill?.note != null) setNote(prefill.note)
+    if (prefill?.expires_at != null) setExpiry(formatDate(prefill.expires_at))
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -63,6 +103,11 @@ export function VoucherForm({ voucher, submitLabel, savingLabel, onSubmit, onCan
       return
     }
 
+    if (trimmedExpiry !== '' && parsedExpiry === null) {
+      setError('תאריך התפוגה אינו תקין. הקלידו אותו בצורה דד/חח/שששש, לדוגמה 30/11/2026.')
+      return
+    }
+
     const trimmedAmount = amount.trim()
     let parsedAmount: number | null = null
     if (trimmedAmount !== '') {
@@ -79,6 +124,7 @@ export function VoucherForm({ voucher, submitLabel, savingLabel, onSubmit, onCan
       code: code.trim(),
       amount: parsedAmount,
       note: note.trim() === '' ? null : note.trim(),
+      expires_at: parsedExpiry,
       photoFile,
       removePhoto,
     })
@@ -137,12 +183,44 @@ export function VoucherForm({ voucher, submitLabel, savingLabel, onSubmit, onCan
       </div>
 
       <div>
+        <label className="mb-1 block text-sm font-medium text-slate-700">תוקף עד (אופציונלי)</label>
+        {/* A plain text field rather than <input type="date">: the native picker
+            renders in the device's locale, so some users would be shown
+            mm/dd/yyyy. Typing eight digits gives the same dd/mm/yyyy
+            everywhere, and inputMode="numeric" still raises the number pad. */}
+        <input
+          value={expiry}
+          onChange={(e) => setExpiry(maskDateInput(e.target.value))}
+          inputMode="numeric"
+          placeholder="דד/חח/שששש"
+          maxLength={10}
+          dir="ltr"
+          className={`w-full rounded-lg border px-3 py-2 text-start text-sm focus:outline-none focus:ring-1 ${
+            expiryInvalid
+              ? 'border-red-400 focus:border-red-500 focus:ring-red-500'
+              : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'
+          }`}
+        />
+        {expiryInvalid && (
+          <p className="mt-1 text-sm text-red-600">תאריך זה אינו קיים. לדוגמה: 30/11/2026.</p>
+        )}
+        {!expiryInvalid && expiryAlreadyPast && (
+          <p className="mt-1 text-sm text-amber-700">
+            התאריך כבר עבר — השובר יישמר בלשונית "פג תוקף".
+          </p>
+        )}
+        {!expiryInvalid && !expiryAlreadyPast && (
+          <p className="mt-1 text-xs text-slate-400">השאירו ריק אם לשובר אין תאריך תפוגה.</p>
+        )}
+      </div>
+
+      <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">הערה (אופציונלי)</label>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={3}
-          placeholder="לדוגמה: תקף עד סוף השנה, לא כולל מבצעים"
+          placeholder="לדוגמה: לא כולל מבצעים, לא כולל פריטי סייל"
           className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         />
       </div>

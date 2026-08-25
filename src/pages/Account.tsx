@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { useVouchers, type LinkedAccount } from '../context/VouchersContext'
 import { LinkAccountDialog } from '../components/LinkAccountDialog'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { PushSettings } from '../components/PushSettings'
 
 const dateFormatter = new Intl.DateTimeFormat('he-IL')
 
@@ -72,6 +73,8 @@ export function Account() {
         <p className="text-sm text-slate-500">מחוברים כ־</p>
         <p className="mt-1 break-all font-medium text-slate-900">{user?.email}</p>
       </div>
+
+      <PushSettings />
 
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="font-semibold text-slate-900">חשבונות מקושרים</h2>

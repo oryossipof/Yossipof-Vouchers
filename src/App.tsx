@@ -10,6 +10,7 @@ import { ResendConfirmation } from './pages/ResendConfirmation'
 import { ResetPassword } from './pages/ResetPassword'
 import { Dashboard } from './pages/Dashboard'
 import { UsedVouchers } from './pages/UsedVouchers'
+import { ExpiredVouchers } from './pages/ExpiredVouchers'
 import { AddVoucher } from './pages/AddVoucher'
 import { EditVoucher } from './pages/EditVoucher'
 import { ClaimShare } from './pages/ClaimShare'
@@ -37,6 +38,7 @@ function App() {
             }
           >
             <Route path="/" element={<Dashboard />} />
+            <Route path="/expired" element={<ExpiredVouchers />} />
             <Route path="/used" element={<UsedVouchers />} />
             <Route path="/add" element={<AddVoucher />} />
             <Route path="/edit/:id" element={<EditVoucher />} />

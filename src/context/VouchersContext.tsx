@@ -3,6 +3,8 @@ import { supabase, VOUCHER_PHOTOS_BUCKET } from '../lib/supabase'
 import type { VoucherFormInput, Voucher, VoucherStatus } from '../types'
 import { useAuth } from './AuthContext'
 import { duplicateMessage, findVoucherByCode as findByCode } from '../lib/vouchers'
+import { isExpired, todayInIsrael } from '../lib/expiry'
+import { syncPushSubscription } from '../lib/push'
 
 export type ClaimOutcome = 'joined' | 'already_member' | 'own_voucher'
 
@@ -48,7 +50,10 @@ export interface BundleClaimResult {
 interface VouchersContextValue {
   vouchers: Voucher[]
   active: Voucher[]
+  expired: Voucher[]
   used: Voucher[]
+  /** Today in Israel as `YYYY-MM-DD`, the yardstick every expiry is measured against. */
+  today: string
   loading: boolean
   error: string | null
   addVoucher: (input: VoucherFormInput) => Promise<{ error: string | null }>
@@ -84,6 +89,10 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
   const [vouchers, setVouchers] = useState<Voucher[]>([])
   const [participants, setParticipants] = useState<Record<string, ShareParticipant[]>>({})
   const [linkedAccounts, setLinkedAccounts] = useState<LinkedAccount[]>([])
+  // Which vouchers count as expired depends on the date, not on any event, so
+  // a session left open overnight would otherwise keep showing yesterday's
+  // split. This is refreshed alongside the data below.
+  const [today, setToday] = useState(() => todayInIsrael())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -131,6 +140,13 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     refresh()
   }, [refresh])
 
+  // Safari never fires `pushsubscriptionchange`, and on Chrome it can fire with
+  // no page open to act on it, so re-registering on start is what actually
+  // keeps endpoints current. It also re-points a shared device at this account.
+  useEffect(() => {
+    if (user) void syncPushSubscription()
+  }, [user])
+
   // Live updates. Any change to a voucher you can see, or to who holds it,
   // re-reads the visible set. Refetching rather than patching the row in place
   // keeps this correct for deletes and for membership changes, where the
@@ -140,6 +156,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
 
     let timer: ReturnType<typeof setTimeout> | undefined
     const nudge = () => {
+      setToday(todayInIsrael())
       clearTimeout(timer)
       timer = setTimeout(() => refresh(true), 150)
     }
@@ -159,8 +176,13 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('online', nudge)
 
+    // Backstop for a session that stays visible across midnight -- on a desktop
+    // browser left open, no visibility or network event ever fires.
+    const clock = setInterval(() => setToday(todayInIsrael()), 60 * 60 * 1000)
+
     return () => {
       clearTimeout(timer)
+      clearInterval(clock)
       supabase.removeChannel(channel)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', nudge)
@@ -203,6 +225,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         code: input.code,
         amount: input.amount,
         note: input.note,
+        expires_at: input.expires_at,
       })
       .select()
       .single()
@@ -253,6 +276,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         code: input.code,
         amount: input.amount,
         note: input.note,
+        expires_at: input.expires_at,
         photo_path: photoPath,
       })
       .eq('id', id)
@@ -448,7 +472,11 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     return data.signedUrl
   }
 
-  const active = vouchers.filter((v) => v.status === 'active')
+  // A used voucher stays under "used" even once its date passes: it was
+  // already spent, and reclassifying it as expired would lose that. Only an
+  // unspent voucher can expire.
+  const active = vouchers.filter((v) => v.status === 'active' && !isExpired(v, today))
+  const expired = vouchers.filter((v) => v.status === 'active' && isExpired(v, today))
   const used = vouchers.filter((v) => v.status === 'used')
 
   return (
@@ -456,7 +484,9 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
       value={{
         vouchers,
         active,
+        expired,
         used,
+        today,
         loading,
         error,
         addVoucher,
