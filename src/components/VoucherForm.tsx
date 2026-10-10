@@ -3,6 +3,10 @@ import type { Voucher, VoucherFormInput } from '../types'
 import { useVouchers } from '../context/VouchersContext'
 import { formatDate, maskDateInput, parseDate, todayInIsrael } from '../lib/expiry'
 
+/** Shared by the two photo buttons, which differ only in what they open. */
+const PHOTO_BUTTON =
+  'flex-1 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100'
+
 interface VoucherFormProps {
   voucher?: Voucher
   /**
@@ -302,18 +306,10 @@ export function VoucherForm({
           className="hidden"
         />
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => cameraInputRef.current?.click()}
-            className="flex-1 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
-          >
+          <button type="button" onClick={() => cameraInputRef.current?.click()} className={PHOTO_BUTTON}>
             צילום תמונה
           </button>
-          <button
-            type="button"
-            onClick={() => galleryInputRef.current?.click()}
-            className="flex-1 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
-          >
+          <button type="button" onClick={() => galleryInputRef.current?.click()} className={PHOTO_BUTTON}>
             בחירה מהגלריה
           </button>
         </div>

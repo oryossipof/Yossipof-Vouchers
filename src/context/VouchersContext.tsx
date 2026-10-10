@@ -85,6 +85,21 @@ interface VouchersContextValue {
 
 const VouchersContext = createContext<VouchersContextValue | undefined>(undefined)
 
+/**
+ * The columns the form owns, which adding and editing both write. Kept in one
+ * place so a new field cannot be added to one path and forgotten in the other.
+ * `photo_path` is deliberately not here: the two paths decide it differently.
+ */
+function voucherFields(input: VoucherFormInput) {
+  return {
+    store_name: input.store_name,
+    code: input.code,
+    amount: input.amount,
+    note: input.note,
+    expires_at: input.expires_at,
+  }
+}
+
 export function VouchersProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [vouchers, setVouchers] = useState<Voucher[]>([])
@@ -233,14 +248,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
 
     const { data: inserted, error: insertError } = await supabase
       .from('vouchers')
-      .insert({
-        user_id: user.id,
-        store_name: input.store_name,
-        code: input.code,
-        amount: input.amount,
-        note: input.note,
-        expires_at: input.expires_at,
-      })
+      .insert({ user_id: user.id, ...voucherFields(input) })
       .select()
       .single()
 
@@ -250,9 +258,14 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
       // The voucher row exists by now. If its photo can't be attached, take
       // the row back out: leaving it would save the voucher without the photo,
       // and the retry would then be refused as a duplicate code.
+      const rollback = async (orphan?: string) => {
+        if (orphan) await removePhotoObject(orphan)
+        await supabase.from('vouchers').delete().eq('id', inserted.id)
+      }
+
       const { path, error: uploadError } = await uploadPhoto(inserted.id, input.photoFile)
       if (uploadError || !path) {
-        await supabase.from('vouchers').delete().eq('id', inserted.id)
+        await rollback()
         return { error: uploadError ?? 'העלאת התמונה נכשלה' }
       }
 
@@ -262,8 +275,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
         .eq('id', inserted.id)
 
       if (updateError) {
-        await removePhotoObject(path)
-        await supabase.from('vouchers').delete().eq('id', inserted.id)
+        await rollback(path)
         return { error: updateError.message }
       }
     }
@@ -294,14 +306,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
 
     const { error } = await supabase
       .from('vouchers')
-      .update({
-        store_name: input.store_name,
-        code: input.code,
-        amount: input.amount,
-        note: input.note,
-        expires_at: input.expires_at,
-        photo_path: photoPath,
-      })
+      .update({ ...voucherFields(input), photo_path: photoPath })
       .eq('id', id)
 
     if (error) {
@@ -336,9 +341,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
   }
 
   async function removeVoucher(id: string, photoPath: string | null) {
-    if (photoPath) {
-      await supabase.storage.from(VOUCHER_PHOTOS_BUCKET).remove([photoPath])
-    }
+    if (photoPath) await removePhotoObject(photoPath)
     const { error } = await supabase.from('vouchers').delete().eq('id', id)
     if (!error) await refresh()
     return { error: error?.message ?? null }
