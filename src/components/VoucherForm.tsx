@@ -41,6 +41,8 @@ export function VoucherForm({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null)
   const [removePhoto, setRemovePhoto] = useState(false)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -106,9 +108,12 @@ export function VoucherForm({
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null
+    // Clear the input so picking the same photo again still fires onChange.
+    e.target.value = ''
+    if (!file) return
     setPhotoFile(file)
-    setPhotoPreview(file ? URL.createObjectURL(file) : null)
-    if (file) setRemovePhoto(false)
+    setPhotoPreview(URL.createObjectURL(file))
+    setRemovePhoto(false)
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -279,13 +284,39 @@ export function VoucherForm({
 
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">תמונה (אופציונלי)</label>
+        {/* Two inputs: `capture` sends a phone straight to the camera with no
+            way back to the gallery, so the gallery gets its own input. */}
         <input
+          ref={cameraInputRef}
           type="file"
           accept="image/*"
           capture="environment"
           onChange={handlePhotoChange}
-          className="w-full text-sm text-slate-600 file:me-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-indigo-700 hover:file:bg-indigo-100"
+          className="hidden"
         />
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handlePhotoChange}
+          className="hidden"
+        />
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="flex-1 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+          >
+            צילום תמונה
+          </button>
+          <button
+            type="button"
+            onClick={() => galleryInputRef.current?.click()}
+            className="flex-1 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+          >
+            בחירה מהגלריה
+          </button>
+        </div>
         {photoPreview && (
           <img src={photoPreview} alt="תצוגה מקדימה" className="mt-3 h-40 w-full rounded-lg object-cover" />
         )}
