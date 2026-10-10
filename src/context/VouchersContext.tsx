@@ -216,7 +216,7 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
   async function uploadPhoto(voucherId: string, file: File) {
     if (!user) return { path: null as string | null, error: 'לא מחוברים' }
 
-    let photo: Blob
+    let photo: File
     try {
       photo = await preparePhoto(file)
     } catch (e) {

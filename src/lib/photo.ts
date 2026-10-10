@@ -74,6 +74,14 @@ async function decode(file: File): Promise<CanvasImageSource & { width: number; 
   }
 }
 
+/** Files this module has already produced, so a second pass is a no-op. */
+const alreadyPrepared = new WeakSet<File>()
+
+function remember(file: File) {
+  alreadyPrepared.add(file)
+  return file
+}
+
 function toJpeg(canvas: HTMLCanvasElement) {
   return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY))
 }
@@ -83,7 +91,12 @@ function toJpeg(canvas: HTMLCanvasElement) {
  * decode the image, otherwise the original file if the bucket would take it.
  * Throws with a message for the user when neither works.
  */
-export async function preparePhoto(file: File): Promise<Blob> {
+export async function preparePhoto(file: File): Promise<File> {
+  // The form prepares a photo when it is picked, and the upload prepares again
+  // as its own guarantee. Without this the second pass would re-encode an
+  // already-shrunk JPEG, costing another generation of quality for nothing.
+  if (alreadyPrepared.has(file)) return file
+
   try {
     const image = await decode(file)
     const { width, height } = fitWithin(image.width, image.height, MAX_PHOTO_DIMENSION)
@@ -98,7 +111,9 @@ export async function preparePhoto(file: File): Promise<Blob> {
       ctx.drawImage(image, 0, 0, width, height)
       if ('close' in image && typeof image.close === 'function') image.close()
       const blob = await toJpeg(canvas)
-      if (blob && blob.size > 0 && blob.size <= MAX_PHOTO_BYTES) return blob
+      if (blob && blob.size > 0 && blob.size <= MAX_PHOTO_BYTES) {
+        return remember(new File([blob], 'voucher.jpg', { type: 'image/jpeg' }))
+      }
     }
   } catch {
     // The browser can't decode it (e.g. HEIC outside Safari). Try it as is.
@@ -110,5 +125,5 @@ export async function preparePhoto(file: File): Promise<Blob> {
   if (file.size > MAX_PHOTO_BYTES) {
     throw new Error('התמונה גדולה מדי (מעל 5MB). נא לבחור תמונה קטנה יותר.')
   }
-  return file
+  return remember(file)
 }

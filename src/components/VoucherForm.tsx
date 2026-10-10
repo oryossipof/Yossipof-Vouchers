@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import type { Voucher, VoucherFormInput } from '../types'
 import { useVouchers } from '../context/VouchersContext'
 import { formatDate, maskDateInput, parseDate, todayInIsrael } from '../lib/expiry'
+import { preparePhoto } from '../lib/photo'
 
 /** Shared by the two photo buttons, which differ only in what they open. */
 const PHOTO_BUTTON =
-  'flex-1 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100'
+  'flex-1 cursor-pointer rounded-lg bg-indigo-50 px-3 py-2 text-center text-sm font-medium text-indigo-700 hover:bg-indigo-100'
 
 interface VoucherFormProps {
   voucher?: Voucher
@@ -45,8 +46,11 @@ export function VoucherForm({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null)
   const [removePhoto, setRemovePhoto] = useState(false)
-  const cameraInputRef = useRef<HTMLInputElement>(null)
-  const galleryInputRef = useRef<HTMLInputElement>(null)
+  // The two photo inputs are driven by their own labels rather than by script,
+  // so they need stable ids to point at.
+  const photoInputId = useId()
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const [preparingPhoto, setPreparingPhoto] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -110,14 +114,48 @@ export function VoucherForm({
     }
   }, [voucher?.photo_path, getPhotoUrl])
 
-  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null
+  // Replaces the preview and releases the blob the previous one held, so
+  // picking several photos in a row does not leak them all for the life of
+  // the page. The ref mirrors it for the unmount cleanup below.
+  const previewRef = useRef<string | null>(null)
+  function showPreview(url: string | null) {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+    previewRef.current = url
+    setPhotoPreview(url)
+  }
+
+  useEffect(
+    () => () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+    },
+    []
+  )
+
+  // The picked file is shrunk and re-encoded here rather than on save, so the
+  // preview is the image that will actually be stored -- not a full-size
+  // original the phone then has to hold in memory -- and a file that cannot be
+  // used is reported while the user is still looking at the field instead of
+  // after they press save.
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = e.target.files?.[0] ?? null
     // Clear the input so picking the same photo again still fires onChange.
     e.target.value = ''
-    if (!file) return
-    setPhotoFile(file)
-    setPhotoPreview(URL.createObjectURL(file))
-    setRemovePhoto(false)
+    if (!picked) return
+
+    setPhotoError(null)
+    setPreparingPhoto(true)
+    try {
+      const photo = await preparePhoto(picked)
+      setPhotoFile(photo)
+      showPreview(URL.createObjectURL(photo))
+      setRemovePhoto(false)
+    } catch (err) {
+      setPhotoFile(null)
+      showPreview(null)
+      setPhotoError(err instanceof Error ? err.message : 'עיבוד התמונה נכשל')
+    } finally {
+      setPreparingPhoto(false)
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -289,30 +327,53 @@ export function VoucherForm({
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">תמונה (אופציונלי)</label>
         {/* Two inputs: `capture` sends a phone straight to the camera with no
-            way back to the gallery, so the gallery gets its own input. */}
+            way back to the gallery, so the gallery gets its own input.
+
+            They are driven by their own labels, not by a button calling
+            .click() on them, and they are hidden with `sr-only` rather than
+            `hidden`. Both matter on a phone: Safari ignores a programmatic
+            click on an input that is display:none, so the buttons did nothing
+            at all there. A label needs no script and works everywhere. */}
         <input
-          ref={cameraInputRef}
+          id={`${photoInputId}-camera`}
           type="file"
           accept="image/*"
           capture="environment"
           onChange={handlePhotoChange}
-          className="hidden"
+          className="sr-only"
         />
         <input
-          ref={galleryInputRef}
+          id={`${photoInputId}-gallery`}
           type="file"
           accept="image/*"
           onChange={handlePhotoChange}
-          className="hidden"
+          className="sr-only"
         />
         <div className="flex gap-2">
-          <button type="button" onClick={() => cameraInputRef.current?.click()} className={PHOTO_BUTTON}>
+          <label htmlFor={`${photoInputId}-camera`} className={PHOTO_BUTTON}>
             צילום תמונה
-          </button>
-          <button type="button" onClick={() => galleryInputRef.current?.click()} className={PHOTO_BUTTON}>
+          </label>
+          <label htmlFor={`${photoInputId}-gallery`} className={PHOTO_BUTTON}>
             בחירה מהגלריה
-          </button>
+          </label>
         </div>
+        {preparingPhoto && <p className="mt-2 text-sm text-slate-500">מכינים את התמונה…</p>}
+        {/* Saving is blocked while this is showing. Otherwise pressing save
+            after a refused photo would quietly store the voucher without it --
+            the very thing that made the photo go missing in the first place --
+            so dropping it has to be said out loud. */}
+        {photoError && (
+          <p className="mt-2 text-sm text-red-600">
+            {photoError}{' '}
+            <button
+              type="button"
+              onClick={() => setPhotoError(null)}
+              className="font-medium text-indigo-600 underline"
+            >
+              שמירה בלי תמונה
+            </button>
+          </p>
+        )}
         {photoPreview && (
           <img src={photoPreview} alt="תצוגה מקדימה" className="mt-3 h-40 w-full rounded-lg object-cover" />
         )}
@@ -343,7 +404,9 @@ export function VoucherForm({
       <div className="flex gap-2">
         <button
           type="submit"
-          disabled={saving}
+          // Saving mid-preparation, or while a photo stands refused, would
+          // store the voucher without the picture chosen for it.
+          disabled={saving || preparingPhoto || photoError !== null}
           className="flex-1 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {saving ? savingLabel : submitLabel}
