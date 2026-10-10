@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { supabase, VOUCHER_PHOTOS_BUCKET } from '../lib/supabase'
+import { extensionForType, preparePhoto } from '../lib/photo'
 import type { VoucherFormInput, Voucher, VoucherStatus } from '../types'
 import { useAuth } from './AuthContext'
 import { duplicateMessage, findVoucherByCode as findByCode } from '../lib/vouchers'
@@ -199,16 +200,29 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
 
   async function uploadPhoto(voucherId: string, file: File) {
     if (!user) return { path: null as string | null, error: 'לא מחוברים' }
-    // The filename is user-controlled, and it lands in the storage object key.
-    // Keep only a short alphanumeric extension so nothing can steer the path.
-    const rawExt = file.name.split('.').pop() ?? ''
-    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'jpg'
-    const path = `${user.id}/${voucherId}.${ext}`
+
+    let photo: Blob
+    try {
+      photo = await preparePhoto(file)
+    } catch (e) {
+      return { path: null, error: e instanceof Error ? e.message : 'עיבוד התמונה נכשל' }
+    }
+
+    // A fresh key per upload, rather than overwriting <voucher>.<ext>: a
+    // replaced photo never collides with the old object or a cached copy of
+    // it, and the upload needs no upsert. The old object is removed by the
+    // caller once the voucher points at the new one.
+    const type = photo.type || file.type
+    const path = `${user.id}/${voucherId}-${Date.now()}.${extensionForType(type)}`
     const { error } = await supabase.storage
       .from(VOUCHER_PHOTOS_BUCKET)
-      .upload(path, file, { upsert: true })
-    if (error) return { path: null, error: error.message }
+      .upload(path, photo, { contentType: type })
+    if (error) return { path: null, error: `העלאת התמונה נכשלה: ${error.message}` }
     return { path, error: null }
+  }
+
+  async function removePhotoObject(path: string) {
+    await supabase.storage.from(VOUCHER_PHOTOS_BUCKET).remove([path])
   }
 
   async function addVoucher(input: VoucherFormInput) {
@@ -233,15 +247,25 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     if (insertError || !inserted) return { error: insertError?.message ?? 'שמירת השובר נכשלה' }
 
     if (input.photoFile) {
+      // The voucher row exists by now. If its photo can't be attached, take
+      // the row back out: leaving it would save the voucher without the photo,
+      // and the retry would then be refused as a duplicate code.
       const { path, error: uploadError } = await uploadPhoto(inserted.id, input.photoFile)
-      if (uploadError) return { error: uploadError }
+      if (uploadError || !path) {
+        await supabase.from('vouchers').delete().eq('id', inserted.id)
+        return { error: uploadError ?? 'העלאת התמונה נכשלה' }
+      }
 
       const { error: updateError } = await supabase
         .from('vouchers')
         .update({ photo_path: path })
         .eq('id', inserted.id)
 
-      if (updateError) return { error: updateError.message }
+      if (updateError) {
+        await removePhotoObject(path)
+        await supabase.from('vouchers').delete().eq('id', inserted.id)
+        return { error: updateError.message }
+      }
     }
 
     await refresh()
@@ -255,17 +279,16 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
     const duplicate = findVoucherByCode(input.code, id)
     if (duplicate) return { error: duplicateMessage(duplicate) }
 
-    let photoPath = current?.photo_path ?? null
+    const previousPath = current?.photo_path ?? null
+    let photoPath = previousPath
+    let uploadedPath: string | null = null
 
     if (input.photoFile) {
       const { path, error: uploadError } = await uploadPhoto(id, input.photoFile)
-      if (uploadError) return { error: uploadError }
-      if (photoPath && photoPath !== path) {
-        await supabase.storage.from(VOUCHER_PHOTOS_BUCKET).remove([photoPath])
-      }
+      if (uploadError || !path) return { error: uploadError ?? 'העלאת התמונה נכשלה' }
+      uploadedPath = path
       photoPath = path
-    } else if (input.removePhoto && photoPath) {
-      await supabase.storage.from(VOUCHER_PHOTOS_BUCKET).remove([photoPath])
+    } else if (input.removePhoto) {
       photoPath = null
     }
 
@@ -281,7 +304,15 @@ export function VouchersProvider({ children }: { children: ReactNode }) {
       })
       .eq('id', id)
 
-    if (error) return { error: error.message }
+    if (error) {
+      // The voucher still points at its old photo; drop the unused upload.
+      if (uploadedPath) await removePhotoObject(uploadedPath)
+      return { error: error.message }
+    }
+
+    // Only now that the voucher no longer points at it is the old photo safe
+    // to delete.
+    if (previousPath && previousPath !== photoPath) await removePhotoObject(previousPath)
 
     await refresh()
     return { error: null }
